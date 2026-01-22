@@ -1,10 +1,10 @@
 [versions]
-agp = "8.13.2"
+agp = "9.0.0"
 androidx-activityCompose = "1.12.2"
 androidx-appcompat = "1.7.1"
 androidx-core-ktx = "1.17.0"
 coilCompose = "3.3.0"
-compose-multiplatform = "1.9.3"
+compose-multiplatform = "1.10.0"
 #noinspection NewerVersionAvailable
 constraintlayout = "0.6.1-shaded"
 coreSplashscreen = "1.2.0"
@@ -13,7 +13,6 @@ googleServices = "4.4.4"
 haze = "1.7.1"
 kotlin = "2.3.0"
 adaptiveAndroid = "1.2.0"
-kotlinStdlib = "2.3.0"
 biometric = "1.4.0-alpha05"
 gson = "2.13.2"
 kotlinxIoBytestring = "0.8.2"
@@ -26,13 +25,16 @@ material = "1.13.0"
 activityKtx = "1.12.2"
 navigationCompose = "2.9.1"
 datastore = "1.2.0"
-security-crypto = "1.1.0-alpha06"
+security-crypto = "1.1.0"
 ktor = "3.3.3"
 slf4j = "1.7.36"
 kotlinxDatetime = "0.7.1"
 lifecycleRuntimeKtx = "2.10.0"
-composeBom = "2025.12.01"
-playServicesBase = "18.9.0"
+composeBom = "2026.01.00"
+composeMaterialIconsExtended = "1.7.3"
+composeMaterial3 = "1.10.0-alpha05"
+composeComponents = "1.10.0"
+playServicesBase = "18.10.0"
 
 [libraries]
 androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "coreSplashscreen" }
@@ -49,7 +51,7 @@ haze-materials = { module = "dev.chrisbanes.haze:haze-materials", version.ref = 
 jetbrains-kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutinesCore" }
 jetbrains-kotlinx-io-bytestring = { module = "org.jetbrains.kotlinx:kotlinx-io-bytestring", version.ref = "kotlinxIoBytestring" }
 androidx-adaptive-android = { group = "androidx.compose.material3.adaptive", name = "adaptive-android", version.ref = "adaptiveAndroid" }
-kotlin-stdlib = { group = "org.jetbrains.kotlin", name = "kotlin-stdlib", version.ref = "kotlinStdlib" }
+kotlin-stdlib = { group = "org.jetbrains.kotlin", name = "kotlin-stdlib", version.ref = "kotlin" }
 biometric = { module = "androidx.biometric:biometric", version.ref = "biometric" }
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
 kotlinx-io-core = { module = "org.jetbrains.kotlinx:kotlinx-io-core", version.ref = "kotlinxIoCore" }
@@ -80,14 +82,20 @@ androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-toolin
 androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 play-services-base = { group = "com.google.android.gms", name = "play-services-base", version.ref = "playServicesBase" }
+compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose-multiplatform" }
+compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose-multiplatform" }
+compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "composeMaterial3" }
+compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose-multiplatform" }
+compose-components-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "composeComponents" }
+compose-ui-tooling-preview = { module = "org.jetbrains.compose.ui:ui-tooling-preview", version.ref = "compose-multiplatform" }
+compose-materialIconsExtended = { module = "org.jetbrains.compose.material:material-icons-extended", version.ref = "composeMaterialIconsExtended" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
-android-kotlin-multiplatform-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
-jetbrains-kotlin-android = { id = "org.jetbrains.kotlin.android", version = "2.3.0" }
+kotlin-multiplatform-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "serialization" }
-google-services = { id = "com.google.gms.google-services" }
+google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }

@@ -1,17 +1,19 @@
+
+import com.android.build.api.dsl.LibraryExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.jetbrains.kotlin.android)
 }
 
-kotlin {
+tasks.withType<KotlinCompile> {
     compilerOptions {
         jvmTarget = JvmTarget.JVM_17
     }
 }
 
-android {
+extensions.configure<LibraryExtension> {
     namespace = "com.pr0gramm3r101.utils"
     compileSdk = 36
 

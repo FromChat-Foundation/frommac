@@ -1,10 +1,8 @@
-import com.android.build.api.dsl.androidLibrary
-
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.compose.compiler)
-    alias(libs.plugins.android.kotlin.multiplatform.library)
+    alias(libs.plugins.kotlin.multiplatform.library)
 }
 
 kotlin {
@@ -31,13 +29,13 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(libs.kotlin.stdlib)
-            implementation(compose.runtime)
-            implementation(compose.foundation)
-            implementation(compose.material3)
-            implementation(compose.ui)
-            implementation(compose.components.resources)
+            implementation(libs.compose.runtime)
+            implementation(libs.compose.foundation)
+            implementation(libs.compose.material3)
+            implementation(libs.compose.ui)
+            implementation(libs.compose.components.resources)
             implementation(libs.constraintlayout)
-            implementation(compose.materialIconsExtended)
+            implementation(libs.compose.materialIconsExtended)
             implementation(libs.jetbrains.kotlinx.coroutines.core)
             implementation(libs.navigation.compose)
             implementation(libs.kotlinx.serialization.json)

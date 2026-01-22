@@ -1,44 +1,61 @@
 
-import com.android.build.gradle.tasks.MergeSourceSetFolders
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import com.android.build.api.dsl.ApplicationExtension
 import java.io.FileInputStream
 import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.jetbrains.kotlin.android)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.google.services)
 }
 
-kotlin {
-    compilerOptions {
-        jvmTarget = JvmTarget.JVM_17
+abstract class FixComposeResTask : DefaultTask() {
+    @get:InputFiles abstract val inputFiles: ConfigurableFileCollection
+    @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction
+    fun action() {
+        val outDir = outputDirectory.get().asFile.apply {
+            deleteRecursively()
+            mkdirs()
+        }
+
+        inputFiles.forEach { file ->
+            if (file.exists()) {
+                file.copyRecursively(
+                    File(outDir, "composeResources/ru.fromchat"),
+                    overwrite = true
+                )
+            }
+        }
     }
 }
 
-val fixComposeResourcesStructure = tasks.register<Copy>("fixComposeResourcesStructure") {
+val fixComposeResourcesStructure = tasks.register<FixComposeResTask>("fixComposeResourcesStructure") {
     val sharedProject = rootProject.project(":app:shared")
 
-    from(
+    inputFiles.from(
         sharedProject
             .layout
             .buildDirectory
-            .dir("generated/compose/resourceGenerator/preparedResources/commonMain/composeResources")
+            .dir(
+                "generated/compose/resourceGenerator/preparedResources/commonMain/composeResources"
+            )
     )
 
-    into(
-        layout
-            .buildDirectory
-            .dir("intermediates/fixed_compose_res/composeResources/ru.fromchat")
+    outputDirectory.set(
+        layout.buildDirectory.dir("intermediates/fixed_compose_res")
     )
 
-    dependsOn(sharedProject.tasks.matching { it.name.contains("prepareComposeResources", ignoreCase = true) })
-    dependsOn(sharedProject.tasks.matching { it.name.contains("copyNonXmlValueResources", ignoreCase = true) })
+    dependsOn(
+        sharedProject.tasks.matching {
+            it.name.contains("prepareComposeResources", ignoreCase = true)
+        }
+    )
 }
 
-android {
+extensions.configure<ApplicationExtension> {
     namespace = "ru.fromchat"
     compileSdk = 36
 
@@ -87,20 +104,15 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
 
-    sourceSets["main"].apply {
-        assets.srcDirs(
-            layout.buildDirectory.dir("intermediates/fixed_compose_res")
+androidComponents {
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(
+            fixComposeResourcesStructure,
+            FixComposeResTask::outputDirectory
         )
     }
-}
-
-tasks.withType<MergeSourceSetFolders>().configureEach {
-    dependsOn(fixComposeResourcesStructure)
-}
-
-tasks.matching { it.name.contains("lintVital", ignoreCase = true) }.configureEach {
-    dependsOn(fixComposeResourcesStructure)
 }
 
 dependencies {
@@ -126,6 +138,3 @@ dependencies {
     implementation(project(":app:shared"))
     implementation(project(":utils:shared"))
 }
-
-// Process `google-services.json` into resources so Firebase initializes automatically.
-apply(plugin = "com.google.gms.google-services")

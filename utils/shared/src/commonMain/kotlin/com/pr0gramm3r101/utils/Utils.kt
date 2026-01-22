@@ -7,12 +7,11 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocal
-import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusManager
-import androidx.compose.ui.platform.ClipboardManager
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.Clipboard
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
@@ -68,13 +67,10 @@ expect fun Modifier.clearFocusOnKeyboardDismiss(): Modifier
 
 operator fun Modifier.plus(other: Modifier) = then(other)
 
-var ClipboardManager.text
-    get() = getText()
-    set(value) = setText(value!!)
-
 @Composable
 expect fun ToggleNavScrimEffect(enabled: Boolean = false)
 
+// TODO fix implementation
 interface SupportClipboardManager {
     suspend fun setText(string: String)
     suspend fun getText(): String?
@@ -83,21 +79,21 @@ interface SupportClipboardManager {
     fun setTextListener(listener: (String) -> Unit)
 }
 
-val LocalSupportClipboardManager: ProvidableCompositionLocal<SupportClipboardManager> = compositionLocalOf {
+val LocalSupportClipboardManager = compositionLocalOf<SupportClipboardManager> {
     throw IllegalStateException("This CompositionLocal hasn't been provided.")
 }
 
-val supportClipboardManagerImpl
-    @Composable get() = LocalClipboardManager().toSupport()
+val supportClipboardManagerImpl @Composable get() = LocalClipboard().toSupport()
 
-inline fun ClipboardManager.toSupport() = object : SupportClipboardManager {
+inline fun Clipboard.toSupport() = object : SupportClipboardManager {
     private var listener: ((String) -> Unit)? = null
 
     override suspend fun setText(string: String) {
-        setText(string.toAnnotatedString())
+        setText(string)
         listener?.invoke(string)
     }
-    override suspend fun getText() = this@toSupport.getText()?.toString() ?: ""
+
+    override suspend fun getText() = this@toSupport.getClipEntry()?.toString() ?: ""
 
     override fun setTextListener(listener: (String) -> Unit) {
         this.listener = listener
@@ -109,7 +105,9 @@ fun String.toAnnotatedString() = AnnotatedString(this)
 @Composable
 inline operator fun <T> CompositionLocal<T>.invoke() = current
 
-val LocalSnackbar: ProvidableCompositionLocal<SnackbarHostState> = compositionLocalOf { throw NullPointerException() }
+val LocalSnackbar = compositionLocalOf<SnackbarHostState> {
+    throw NullPointerException()
+}
 
 inline fun resetFocus(
     keyboardController: SoftwareKeyboardController?,
@@ -119,8 +117,7 @@ inline fun resetFocus(
     focusManager.clearFocus(true)
 }
 
-val unsupported: Nothing
-    get() = throw UnsupportedOperationException()
+val unsupported: Nothing get() = throw UnsupportedOperationException()
 
 val WindowWidthSizeClass.rawValue: Int get() =
     when (this) {
@@ -145,26 +142,23 @@ val WindowSizeClass.width get() = windowWidthSizeClass
 val WindowSizeClass.height get() = windowHeightSizeClass
 
 val WindowAdaptiveInfo.widthSizeClass get() = windowSizeClass.width
-@Suppress("unused")
 val WindowAdaptiveInfo.heightSizeClass get() = windowSizeClass.height
 
-fun String.encodeJSON(): String {
-    val out = StringBuilder()
-    for (i in indices) {
-        when (val c: Char = get(i)) {
-            '"', '\\', '/' -> out.append('\\').append(c)
-            '\t' -> out.append("\\t")
-            '\b' -> out.append("\\b")
-            '\n' -> out.append("\\n")
-            '\r' -> out.append("\\r")
-            else -> if (c.code <= 0x1F) {
-                out.append("\\u${c.code.toString(16).padStart(4, '0')}")
-            } else {
-                out.append(c)
+fun String.encodeJSON() = buildString {
+    for (i in this@encodeJSON.indices) {
+        append(
+            when (val c: Char = get(i)) {
+                '"', '\\', '/' -> "\\$c"
+                '\t' -> "\\t"
+                '\b' -> "\\b"
+                '\n' -> "\\n"
+                '\r' -> "\\r"
+                else -> if (c.code <= 0x1F) {
+                    "\\u${c.code.toString(16).padStart(4, '0')}"
+                } else c
             }
-        }
+        )
     }
-    return "$out"
 }
 
 @Composable
