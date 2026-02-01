@@ -1,0 +1,44 @@
+package ru.fromchat.crypto.dm
+
+import com.pr0gramm3r101.utils.crypto.Base64
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import ru.fromchat.crypto.backup.BackupCryptoPlatform
+
+actual object DmCrypto {
+    private const val AES_KEY_SIZE = 32
+    private const val GCM_IV_SIZE = 12
+    private const val GCM_TAG_SIZE = 16
+
+    actual suspend fun unwrapMek(
+        wrappedMekB64: String,
+        wrappingKey: ByteArray
+    ): ByteArray = withContext(Dispatchers.Default) {
+        require(wrappingKey.size == AES_KEY_SIZE) { "Wrapping key must be 32 bytes" }
+
+        val wrapped = Base64.decode(wrappedMekB64)
+        require(wrapped.size >= GCM_IV_SIZE + GCM_TAG_SIZE) { "Wrapped MEK too short" }
+
+        val iv = wrapped.sliceArray(0 until GCM_IV_SIZE)
+        val ciphertext = wrapped.sliceArray(GCM_IV_SIZE until wrapped.size)
+
+        BackupCryptoPlatform.aesGcmDecrypt(wrappingKey, iv, ciphertext)
+    }
+
+    actual suspend fun decryptEnvelope(
+        ivB64: String,
+        ciphertextB64: String,
+        mek: ByteArray
+    ): ByteArray = withContext(Dispatchers.Default) {
+        require(mek.size == AES_KEY_SIZE) { "MEK must be 32 bytes" }
+
+        val iv = Base64.decode(ivB64)
+        val ciphertext = Base64.decode(ciphertextB64)
+
+        require(iv.size == GCM_IV_SIZE) { "IV must be 12 bytes" }
+        require(ciphertext.size >= GCM_TAG_SIZE) { "Ciphertext too short" }
+
+        BackupCryptoPlatform.aesGcmDecrypt(mek, iv, ciphertext)
+    }
+}
+

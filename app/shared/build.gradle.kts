@@ -37,6 +37,8 @@ kotlin {
 
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
+            // NaCl box implementation for transport encryption (Android/JVM only)
+            implementation("org.purejava:tweetnacl-java:1.1.3")
         }
 
         commonMain.dependencies {
@@ -73,6 +75,7 @@ kotlin {
             implementation(libs.coil.network.ktor3)
 
             implementation(project(":utils:shared"))
+            implementation(libs.krypto)
         }
 
         iosMain.dependencies {

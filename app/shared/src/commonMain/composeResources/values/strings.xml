@@ -56,6 +56,18 @@
     <string name="as_system">As system</string>
     <string name="light">Light</string>
     <string name="dark">Dark</string>
+    <string name="debug_tools">Debug API</string>
+    <string name="debug_tools_d">Inspect profile and DM endpoints used by the client.</string>
+    <string name="debug_status_placeholder">Status will appear here</string>
+    <string name="debug_profile_loaded">Profile loaded</string>
+    <string name="debug_load_profile">Load own profile</string>
+    <string name="debug_not_loaded">No data loaded yet</string>
+    <string name="debug_conversations_loaded">Conversations loaded</string>
+    <string name="debug_load_conversations">Load DM conversations</string>
+    <string name="debug_history_user_id_label">History user ID</string>
+    <string name="debug_invalid_user_id">Enter a valid user ID</string>
+    <string name="debug_history_loaded">DM history loaded</string>
+    <string name="debug_load_history">Load DM history</string>
     
     <!-- Error Messages -->
     <string name="error_unexpected">Unexpected error</string>

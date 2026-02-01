@@ -27,6 +27,7 @@ import ru.fromchat.core.config.Config
 import ru.fromchat.ui.auth.LoginScreen
 import ru.fromchat.ui.auth.RegisterScreen
 import ru.fromchat.ui.chat.PublicChatScreen
+import ru.fromchat.ui.debug.DebugApiScreen
 import ru.fromchat.ui.main.MainScreen
 import ru.fromchat.ui.setup.ServerConfigScreen
 
@@ -167,6 +168,10 @@ fun App(scrollToMessageId: Int? = null, startAtPublicChat: Boolean = false) {
 
                     composable("chats/publicChat") {
                         PublicChatScreen(scrollToMessageId = scrollToMessageId)
+                    }
+
+                    composable("debug") {
+                        DebugApiScreen()
                     }
 
                     composable("about") {

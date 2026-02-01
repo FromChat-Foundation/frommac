@@ -19,6 +19,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.request.put
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
@@ -30,6 +31,9 @@ import ru.fromchat.core.config.Config
 import ru.fromchat.fcm.uploadPendingFcmTokenIfAvailable
 import kotlin.concurrent.Volatile
 import kotlin.time.Duration.Companion.milliseconds
+import com.pr0gramm3r101.utils.crypto.Base64
+import ru.fromchat.crypto.IdentityKeyManager
+import ru.fromchat.crypto.transport.TransportCrypto
 
 /**
  * Creates a platform-specific HTTP client that supports WebSockets
@@ -157,6 +161,160 @@ object ApiClient {
                 beforeId?.let { parameter("before_id", it) }
             }
             .body<MessagesResponse>()
+
+    suspend fun getOwnProfile(): UserProfile =
+        http
+            .get("${Config.apiBaseUrl}/user/profile") {
+                contentType(ContentType.Application.Json)
+            }
+            .body()
+
+    suspend fun getProfileById(userId: Int): UserProfile =
+        http
+            .get("${Config.apiBaseUrl}/user/id/$userId") {
+                contentType(ContentType.Application.Json)
+            }
+            .body()
+
+    suspend fun getDmConversations(): List<DmConversation> =
+        http
+            .get("${Config.apiBaseUrl}/dm/conversations") {
+                contentType(ContentType.Application.Json)
+            }
+            .body<DmConversationsResponse>()
+            .conversations
+
+    suspend fun getDmHistory(
+        otherUserId: Int,
+        limit: Int = 50,
+        beforeId: Int? = null
+    ): DmHistoryResponse =
+        http
+            .get("${Config.apiBaseUrl}/dm/history/$otherUserId") {
+                contentType(ContentType.Application.Json)
+                parameter("limit", limit)
+                beforeId?.let { parameter("before_id", it) }
+            }
+            .body()
+
+    suspend fun getOwnPublicKey(): PublicKeyResponse =
+        http
+            .get("${Config.apiBaseUrl}/crypto/public-key") {
+                contentType(ContentType.Application.Json)
+            }
+            .body()
+
+    suspend fun getUserPublicKey(userId: Int): PublicKeyResponse =
+        http
+            .get("${Config.apiBaseUrl}/crypto/public-key/of/$userId") {
+                contentType(ContentType.Application.Json)
+            }
+            .body()
+
+    private suspend fun getTransportPublicKey(): TransportKeyResponse =
+        http
+            .get("${Config.apiBaseUrl}/dm/key/transport/public") {
+                contentType(ContentType.Application.Json)
+            }
+            .body()
+
+    /**
+     * Send a direct message with transport-layer encryption, mirroring the Web client's /dm/send flow.
+     */
+    suspend fun sendDm(
+        recipientId: Int,
+        plaintext: String,
+        replyToId: Int? = null
+    ) {
+        val keys = IdentityKeyManager.getCurrentKeys()
+            ?: IdentityKeyManager.restoreFromLocal()
+            ?: error("Identity keys not initialized. Please log in again.")
+
+        val recipientPublicKey = getUserPublicKey(recipientId).publicKey
+            ?: error("Recipient public key not found")
+        val transportKey = getTransportPublicKey()
+
+        val transportCipher = TransportCrypto.encryptWithTransportKey(
+            plaintext = plaintext,
+            transportPublicKeyB64 = transportKey.publicKeyB64
+        )
+
+        val senderPublicKeyB64 = Base64.encode(keys.publicKey)
+
+        val body = SendDmRequest(
+            recipientId = recipientId,
+            clientPublicKeyB64 = transportCipher.clientPublicKeyB64,
+            transportNonceB64 = transportCipher.nonceB64,
+            transportCiphertextB64 = transportCipher.ciphertextB64,
+            senderPublicKeyB64 = senderPublicKeyB64,
+            recipientPublicKeyB64 = recipientPublicKey,
+            replyToId = replyToId,
+            transportFiles = emptyList()
+        )
+
+        http.post("${Config.apiBaseUrl}/dm/send") {
+            contentType(ContentType.Application.Json)
+            setBody(body)
+        }
+    }
+
+    /**
+     * Edit an existing direct message using the same transport encryption scheme as /dm/send.
+     */
+    suspend fun editDm(
+        messageId: Int,
+        recipientId: Int,
+        plaintext: String
+    ) {
+        val keys = IdentityKeyManager.getCurrentKeys()
+            ?: IdentityKeyManager.restoreFromLocal()
+            ?: error("Identity keys not initialized. Please log in again.")
+
+        val recipientPublicKey = getUserPublicKey(recipientId).publicKey
+            ?: error("Recipient public key not found")
+        val transportKey = getTransportPublicKey()
+
+        val transportCipher = TransportCrypto.encryptWithTransportKey(
+            plaintext = plaintext,
+            transportPublicKeyB64 = transportKey.publicKeyB64
+        )
+
+        val senderPublicKeyB64 = Base64.encode(keys.publicKey)
+
+        val body = EditDmRequest(
+            clientPublicKeyB64 = transportCipher.clientPublicKeyB64,
+            transportNonceB64 = transportCipher.nonceB64,
+            transportCiphertextB64 = transportCipher.ciphertextB64,
+            senderPublicKeyB64 = senderPublicKeyB64,
+            recipientPublicKeyB64 = recipientPublicKey
+        )
+
+        http.put("${Config.apiBaseUrl}/dm/edit/$messageId") {
+            contentType(ContentType.Application.Json)
+            setBody(body)
+        }
+    }
+
+    suspend fun fetchBackupBlob(): String? {
+        return try {
+            val response = http.get("${Config.apiBaseUrl}/crypto/backup") {
+                contentType(ContentType.Application.Json)
+            }
+            val backupResponse = response.body<BackupBlobResponse>()
+            backupResponse.blob
+        } catch (e: Exception) {
+            ru.fromchat.core.Logger.d("ApiClient", "No backup found or error fetching: ${e.message}")
+            null
+        }
+    }
+
+    suspend fun uploadBackupBlob(blobJson: String) {
+        val payload = BackupBlobRequest(blob = blobJson)
+        http.post("${Config.apiBaseUrl}/crypto/backup") {
+            contentType(ContentType.Application.Json)
+            setBody(payload)
+        }
+    }
 
     // Validate token by fetching user profile
     suspend fun validateToken(): Boolean {

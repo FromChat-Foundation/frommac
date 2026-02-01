@@ -43,6 +43,7 @@ import ru.fromchat.Res
 import ru.fromchat.api.ApiClient
 import ru.fromchat.api.LoginRequest
 import ru.fromchat.api.apiRequest
+import ru.fromchat.crypto.IdentityKeyManager
 import ru.fromchat.change_server
 import ru.fromchat.error_unexpected
 import ru.fromchat.fill_all_fields
@@ -167,8 +168,10 @@ fun LoginScreen(
 
                             // Derive auth secret before sending (matches frontend implementation)
                             scope.launch {
-                                val derived = deriveAuthSecret(username.trim(), password.trim())
-                                
+                                val trimmedUsername = username.trim()
+                                val trimmedPassword = password.trim()
+                                val derived = deriveAuthSecret(trimmedUsername, trimmedPassword)
+
                                 apiRequest(
                                     unexpectedError = errorUnexpected,
                                     onError = { message, _ ->
@@ -178,7 +181,14 @@ fun LoginScreen(
                                         onLoginSuccess()
                                     }
                                 ) {
-                                    ApiClient.login(LoginRequest(username.trim(), derived))
+                                    val response = ApiClient.login(LoginRequest(trimmedUsername, derived))
+                                    // Ensure identity keys and backup are initialized after successful login
+                                    IdentityKeyManager.ensureKeysOnLogin(
+                                        username = trimmedUsername,
+                                        password = trimmedPassword,
+                                        token = response.token
+                                    )
+                                    response
                                 }
                             }
                         }

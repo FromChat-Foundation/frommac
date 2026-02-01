@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -196,6 +197,20 @@ fun SettingsTab(
                         dividerThickness = 2.dp,
                         leadingContent = {
                             Icon(Icons.Filled.Storage, null)
+                        }
+                    )
+
+                    ListItem(
+                        headline = "Debug API",
+                        supportingText = "Inspect profile and DM endpoints used by the client.",
+                        onClick = {
+                            navController.navigate("debug")
+                        },
+                        divider = true,
+                        dividerColor = MaterialTheme.colorScheme.surface,
+                        dividerThickness = 2.dp,
+                        leadingContent = {
+                            Icon(Icons.Filled.BugReport, null)
                         }
                     )
 

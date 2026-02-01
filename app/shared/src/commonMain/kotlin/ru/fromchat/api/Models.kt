@@ -1,5 +1,6 @@
 package ru.fromchat.api
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
@@ -32,6 +33,38 @@ data class User(
     val admin: Boolean? = null,
     val bio: String? = null,
     val profile_picture: String? = null
+)
+
+@Serializable
+data class UserProfile(
+    val id: Int,
+    val username: String,
+    @SerialName("display_name") val displayName: String? = null,
+    @SerialName("profile_picture") val profilePicture: String? = null,
+    val bio: String? = null,
+    val online: Boolean = false,
+    @SerialName("last_seen") val lastSeen: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+    val verified: Boolean? = null,
+    val suspended: Boolean? = null,
+    @SerialName("suspension_reason") val suspensionReason: String? = null,
+    val deleted: Boolean? = null
+)
+
+@Serializable
+data class ProfileDialogData(
+    @SerialName("user_id") val userId: Int? = null,
+    val username: String? = null,
+    @SerialName("display_name") val displayName: String? = null,
+    @SerialName("profile_picture") val profilePicture: String? = null,
+    val bio: String? = null,
+    @SerialName("member_since") val memberSince: String? = null,
+    val online: Boolean? = null,
+    @SerialName("is_own_profile") val isOwnProfile: Boolean = false,
+    val verified: Boolean? = null,
+    val suspended: Boolean? = null,
+    @SerialName("suspension_reason") val suspensionReason: String? = null,
+    val deleted: Boolean? = null
 )
 
 @Serializable
@@ -122,6 +155,87 @@ data class TypingData(
     val username: String
 )
 
+@Serializable
+data class DmFile(
+    val id: Int,
+    val name: String,
+    val path: String,
+    @SerialName("dm_envelope_id") val dmEnvelopeId: Int? = null,
+    @SerialName("wrapped_mek_b64") val wrappedMekB64: String? = null,
+    @SerialName("nonce_b64") val nonceB64: String? = null
+)
+
+@Serializable
+data class DmEnvelope(
+    val id: Int,
+    val senderId: Int,
+    val recipientId: Int,
+    @SerialName("iv_b64") val ivB64: String,
+    @SerialName("ciphertext_b64") val ciphertextB64: String,
+    @SerialName("wrapped_mek_b64") val wrappedMekB64: String? = null,
+    val timestamp: String,
+    val replyToId: Int? = null,
+    val files: List<DmFile>? = null
+)
+
+@Serializable
+data class DmConversation(
+    val user: User,
+    val lastMessage: DmEnvelope,
+    val unreadCount: Int
+)
+
+@Serializable
+data class DmConversationsResponse(
+    val conversations: List<DmConversation> = emptyList()
+)
+
+@Serializable
+data class DmHistoryResponse(
+    val messages: List<DmEnvelope> = emptyList(),
+    @SerialName("has_more") val hasMore: Boolean? = null
+)
+
+@Serializable
+data class PublicKeyResponse(
+    val publicKey: String? = null
+)
+
+@Serializable
+data class SendDmFile(
+    @SerialName("encrypted_file_data_b64") val encryptedFileDataB64: String,
+    val filename: String,
+    @SerialName("file_size") val fileSize: Long
+)
+
+@Serializable
+data class SendDmRequest(
+    @SerialName("recipient_id") val recipientId: Int,
+    @SerialName("client_public_key_b64") val clientPublicKeyB64: String,
+    @SerialName("transport_nonce_b64") val transportNonceB64: String,
+    @SerialName("transport_ciphertext_b64") val transportCiphertextB64: String,
+    @SerialName("sender_public_key_b64") val senderPublicKeyB64: String,
+    @SerialName("recipient_public_key_b64") val recipientPublicKeyB64: String,
+    @SerialName("reply_to_id") val replyToId: Int? = null,
+    @SerialName("transport_files") val transportFiles: List<SendDmFile> = emptyList()
+)
+
+@Serializable
+data class EditDmRequest(
+    @SerialName("client_public_key_b64") val clientPublicKeyB64: String,
+    @SerialName("transport_nonce_b64") val transportNonceB64: String,
+    @SerialName("transport_ciphertext_b64") val transportCiphertextB64: String,
+    @SerialName("sender_public_key_b64") val senderPublicKeyB64: String,
+    @SerialName("recipient_public_key_b64") val recipientPublicKeyB64: String
+)
+
+@Serializable
+data class TransportKeyResponse(
+    @SerialName("key_id") val keyId: String,
+    @SerialName("public_key_b64") val publicKeyB64: String,
+    @SerialName("created_at") val createdAt: Double? = null
+)
+
 // Batched updates message
 @Serializable
 data class UpdateItem(
@@ -153,4 +267,14 @@ data class WebSocketEditMessageRequest(
 @Serializable
 data class WebSocketDeleteMessageRequest(
     val message_id: Int
+)
+
+@Serializable
+data class BackupBlobResponse(
+    val blob: String?
+)
+
+@Serializable
+data class BackupBlobRequest(
+    val blob: String
 )
