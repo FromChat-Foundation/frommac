@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -90,143 +91,135 @@ fun MessageItem(
                 Spacer(modifier = Modifier.width(8.dp))
             }
 
-            Column(
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .widthIn(max = 280.dp),
-                horizontalAlignment = if (isAuthor) Alignment.End else Alignment.Start
+            BoxWithConstraints(
+                modifier = Modifier.weight(1f, fill = false)
             ) {
-                // Message bubble
-                val isDark = isSystemInDarkTheme()
-                Box(
-                    modifier = Modifier
-                        .width(IntrinsicSize.Min)
-                        .clip(
-                            RoundedCornerShape(
-                                topStart = 20.dp,
-                                topEnd = 20.dp,
-                                bottomStart = if (isAuthor) 20.dp else 8.dp,
-                                bottomEnd = if (isAuthor) 8.dp else 20.dp
-                            )
-                        )
-                        .conditional(
-                            isAuthor,
-                            `if` = {
-                                it
-                                    .shadow(
-                                        elevation = 8.dp,
-                                        shape = RoundedCornerShape(
-                                            topStart = 20.dp,
-                                            topEnd = 20.dp,
-                                            bottomStart = 20.dp,
-                                            bottomEnd = 8.dp
-                                        ),
-                                        spotColor = if (isDark) Color(0x66000000) else Color(0x33000000)
-                                    )
-                                    .background(getMessageGradient(isDark))
-                            },
-                            `else` = {
-                                background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                            }
-                        )
-                        .padding(top = 6.dp)
+                // Allow bubbles to grow up to 70% of the available row width
+                val maxBubbleWidth = maxWidth * 0.7f
+
+                Column(
+                    horizontalAlignment = if (isAuthor) Alignment.End else Alignment.Start
                 ) {
-                    Column {
-                        // Username inside bubble (for received messages)
-                        if (showUsername && !isAuthor) {
-                            Text(
-                                text = message.username,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 4.dp)
+                    // Message bubble
+                    val isDark = isSystemInDarkTheme()
+                    Box(
+                        modifier = Modifier
+                            // Max width: 70% of row, min width: content-driven
+                            .widthIn(max = maxBubbleWidth)
+                            .clip(
+                                RoundedCornerShape(
+                                    topStart = 20.dp,
+                                    topEnd = 20.dp,
+                                    bottomStart = if (isAuthor) 20.dp else 8.dp,
+                                    bottomEnd = if (isAuthor) 8.dp else 20.dp
+                                )
                             )
-                        }
-
-                        // Reply preview
-                        message.reply_to?.let { replyTo ->
-                            Box(
-                                Modifier.padding(bottom = 4.dp, start = 6.dp, end = 6.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .fillMaxWidth()
-                                        .height(IntrinsicSize.Min)
-                                        .conditional(
-                                            isAuthor,
-                                            `if` = {
-                                                background(getReplyMessageGradient(isDark))
-                                            },
-                                            `else` = {
-                                                background(MaterialTheme.colorScheme.surfaceVariant)
-                                            }
+                            .conditional(
+                                isAuthor,
+                                `if` = {
+                                    it
+                                        .shadow(
+                                            elevation = 8.dp,
+                                            shape = RoundedCornerShape(
+                                                topStart = 20.dp,
+                                                topEnd = 20.dp,
+                                                bottomStart = 20.dp,
+                                                bottomEnd = 8.dp
+                                            ),
+                                            spotColor = if (isDark) Color(0x66000000) else Color(0x33000000)
                                         )
-                                ) {
-                                    Box(
-                                        Modifier
-                                            .background(MaterialTheme.colorScheme.primary)
-                                            .width(3.dp)
-                                            .fillMaxHeight()
-                                    )
+                                        .background(getMessageGradient(isDark))
+                                },
+                                `else` = {
+                                    background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                }
+                            )
+                            .padding(top = 6.dp)
+                    ) {
+                        Column {
+                            // Username inside bubble (for received messages)
+                            if (showUsername && !isAuthor) {
+                                Text(
+                                    text = message.username,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 4.dp)
+                                )
+                            }
 
-                                    Column(
-                                        Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                            // Reply preview
+                            message.reply_to?.let { replyTo ->
+                                Box(
+                                    Modifier.padding(bottom = 4.dp, start = 6.dp, end = 6.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .fillMaxWidth()
+                                            .height(IntrinsicSize.Min)
+                                            .conditional(
+                                                isAuthor,
+                                                `if` = {
+                                                    background(getReplyMessageGradient(isDark))
+                                                },
+                                                `else` = {
+                                                    background(MaterialTheme.colorScheme.surfaceVariant)
+                                                }
+                                            )
                                     ) {
-                                        if (showUsername) {
+                                        Box(
+                                            Modifier
+                                                .background(MaterialTheme.colorScheme.primary)
+                                                .width(3.dp)
+                                                .fillMaxHeight()
+                                        )
+
+                                        Column(
+                                            Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                        ) {
+                                            if (showUsername) {
+                                                Text(
+                                                    text = replyTo.username,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontSize = 11.sp
+                                                )
+                                            }
                                             Text(
-                                                text = replyTo.username,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.primary,
-                                                fontSize = 11.sp
+                                                text = replyTo.content.take(50) + if (replyTo.content.length > 50) "..." else "",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontSize = 12.sp,
+                                                maxLines = 1
                                             )
                                         }
-                                        Text(
-                                            text = replyTo.content.take(50) + if (replyTo.content.length > 50) "..." else "",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            fontSize = 12.sp,
-                                            maxLines = 1
-                                        )
                                     }
                                 }
                             }
-                        }
 
-                        // Message content
-                        Text(
-                            text = message.content,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (isAuthor) {
-                                Color.White
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                            modifier = Modifier.padding(horizontal = 12.dp)
-                        )
-
-                        // Timestamp and edited indicator
-                        Row(
-                            modifier = Modifier
-                                .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp),
-                            horizontalArrangement = Arrangement.End,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                            // Message content
                             Text(
-                                text = formatTime(message.timestamp),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontSize = 11.sp,
+                                text = message.content,
+                                style = MaterialTheme.typography.bodyMedium,
                                 color = if (isAuthor) {
-                                    Color.White.copy(alpha = 0.7f)
+                                    Color.White
                                 } else {
-                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                }
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                                modifier = Modifier.padding(horizontal = 12.dp)
                             )
-                            if (message.is_edited) {
-                                Spacer(modifier = Modifier.width(4.dp))
+
+                            // Timestamp and edited indicator
+                            Row(
+                                modifier = Modifier
+                                    .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Text(
-                                    text = "(edited)",
+                                    text = formatTime(message.timestamp),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontSize = 11.sp,
                                     color = if (isAuthor) {
@@ -235,6 +228,19 @@ fun MessageItem(
                                         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                                     }
                                 )
+                                if (message.is_edited) {
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "(edited)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 11.sp,
+                                        color = if (isAuthor) {
+                                            Color.White.copy(alpha = 0.7f)
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
