@@ -52,7 +52,8 @@ fun MessageItem(
     onLongPress: () -> Unit,
     onTapPosition: (Offset) -> Unit = {},
     modifier: Modifier = Modifier,
-    showUsername: Boolean = true
+    showUsername: Boolean = true,
+    currentUserId: Int? = null
 ) {
     AnimatedVisibility(
         visible = true,
@@ -199,17 +200,39 @@ fun MessageItem(
                                 }
                             }
 
-                            // Message content
-                            Text(
-                                text = message.content,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (isAuthor) {
-                                    Color.White
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                },
-                                modifier = Modifier.padding(horizontal = 12.dp)
-                            )
+                            // Attachments (images/files)
+                            if (message.pendingFileUri != null) {
+                                AttachmentPreview(
+                                    file = null,
+                                    dmEnvelope = null,
+                                    currentUserId = null,
+                                    pendingFileUri = message.pendingFileUri,
+                                    isUploading = message.uploadProgress != null,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                                )
+                            }
+                            message.files?.forEach { file ->
+                                AttachmentPreview(
+                                    file = file,
+                                    dmEnvelope = message.dmEnvelope,
+                                    currentUserId = currentUserId,
+                                    pendingFileUri = null,
+                                    isUploading = false,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                                )
+                            }
+                            if (message.content.isNotBlank()) {
+                                Text(
+                                    text = message.content,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (isAuthor) {
+                                        Color.White
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                    modifier = Modifier.padding(horizontal = 12.dp)
+                                )
+                            }
 
                             // Timestamp and edited indicator
                             Row(

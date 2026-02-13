@@ -273,6 +273,24 @@ fun ChatScreen(
         }
     }
 
+    LaunchedEffect(panel) {
+        if (panel.getRecipientId() != null) {
+            AttachmentUploadQueue.progressFlow.collect { progress ->
+                when (progress) {
+                    is ru.fromchat.api.AttachmentUploadProgress.InProgress ->
+                        panel.updateMessage(-progress.jobId.hashCode().let { if (it == 0) -1 else it }) {
+                            if (it.uploadJobId == progress.jobId) it.copy(uploadProgress = progress.percent) else it
+                        }
+                    is ru.fromchat.api.AttachmentUploadProgress.Success ->
+                        panel.updateMessage(-progress.jobId.hashCode().let { if (it == 0) -1 else it }) {
+                            if (it.uploadJobId == progress.jobId) it.copy(uploadProgress = null) else it
+                        }
+                    else -> {}
+                }
+            }
+        }
+    }
+
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
@@ -442,9 +460,30 @@ fun ChatScreen(
                                 if (attachments.isNotEmpty() && recipientId != null) {
                                     val plaintext = text.ifBlank { "" }
                                     attachments.forEach { att ->
+                                        val jobId = "dm_${Clock.System.now().toEpochMilliseconds()}_${att.id}"
+                                        val tempId = -jobId.hashCode().let { if (it == 0) -1 else it }
+                                        val optimisticMessage = Message(
+                                            id = tempId,
+                                            user_id = currentUserId ?: -1,
+                                            content = plaintext.ifBlank { att.filename },
+                                            timestamp = Clock.System.now().toString(),
+                                            is_read = false,
+                                            is_edited = false,
+                                            username = "You",
+                                            profile_picture = null,
+                                            verified = null,
+                                            reply_to = replyTo,
+                                            client_message_id = null,
+                                            reactions = null,
+                                            files = null,
+                                            pendingFileUri = att.uri,
+                                            uploadJobId = jobId,
+                                            uploadProgress = 0
+                                        )
+                                        panel.addMessage(optimisticMessage)
                                         AttachmentUploadQueue.enqueue(
                                             AttachmentUploadJob(
-                                                jobId = "dm_${Clock.System.now().toEpochMilliseconds()}_${att.id}",
+                                                jobId = jobId,
                                                 fileUri = att.uri,
                                                 filename = att.filename,
                                                 recipientId = recipientId,
@@ -523,6 +562,7 @@ fun ChatScreen(
                             MessageItem(
                                 message = message,
                                 isAuthor = message.user_id == currentUserId,
+                                currentUserId = currentUserId,
                                 onLongPress = {
                                     contextMenuState = ContextMenuState(
                                         isOpen = true,

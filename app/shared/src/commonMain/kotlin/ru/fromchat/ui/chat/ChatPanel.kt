@@ -87,7 +87,7 @@ abstract class ChatPanel(
      * Add message to list. Mutex prevents duplicate adds when same update
      * is processed concurrently from multiple WebSocket connections.
      */
-    protected suspend fun addMessage(message: Message) {
+    suspend fun addMessage(message: Message) {
         addMessageMutex.withLock {
             val messageExists = _state.messages.any { it.id == message.id }
             if (!messageExists) {
@@ -104,9 +104,9 @@ abstract class ChatPanel(
     }
 
     /**
-     * Update existing message
+     * Update existing message (public for ChatScreen optimistic UI)
      */
-    protected fun updateMessage(messageId: Int, updates: (Message) -> Message) {
+    fun updateMessage(messageId: Int, updates: (Message) -> Message) {
         updateState { currentState ->
             currentState.copy(
                 messages = currentState.messages.map { msg ->

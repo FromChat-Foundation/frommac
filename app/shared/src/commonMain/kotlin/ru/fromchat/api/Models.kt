@@ -92,7 +92,16 @@ data class Message(
     val verified: Boolean? = null,
     val reply_to: Message? = null,
     val client_message_id: String? = null,
-    val reactions: List<ReactionData>? = null
+    val reactions: List<ReactionData>? = null,
+    val files: List<DmFile>? = null,
+    /** For optimistic UI: local URI when sending, null when confirmed. */
+    val pendingFileUri: String? = null,
+    /** For optimistic UI: jobId to track upload progress. */
+    val uploadJobId: String? = null,
+    /** For optimistic UI: 0-100 upload progress, null when complete. */
+    val uploadProgress: Int? = null,
+    /** For DM file decryption; not serialized over network. */
+    @kotlinx.serialization.Transient val dmEnvelope: DmEnvelope? = null
 )
 
 @Serializable

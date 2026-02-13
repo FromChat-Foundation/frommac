@@ -46,3 +46,25 @@ suspend fun decryptEnvelope(envelope: DmEnvelope, currentUserId: Int?): String {
     val plaintext = DmCrypto.decryptEnvelope(envelope.ivB64, envelope.ciphertextB64, mek)
     return plaintext.decodeToString()
 }
+
+/**
+ * Decrypt a DM file attachment. Fetches encrypted bytes, unwraps file MEK, decrypts.
+ */
+suspend fun decryptFile(
+    file: ru.fromchat.api.DmFile,
+    envelope: DmEnvelope,
+    currentUserId: Int?
+): ByteArray {
+    val wrappedMekB64 = file.wrappedMekB64
+        ?: envelope.files?.find { it.path == file.path }?.wrappedMekB64
+        ?: envelope.wrappedMekB64
+        ?: throw IllegalArgumentException("No MEK available for file decryption: ${file.path}")
+    val nonceB64 = file.nonceB64
+        ?: envelope.files?.find { it.path == file.path }?.nonceB64
+        ?: throw IllegalArgumentException("No nonce available for file decryption: ${file.path}")
+
+    val mek = unwrapMek(wrappedMekB64, envelope, currentUserId)
+    val encryptedBytes = ru.fromchat.api.ApiClient.fetchEncryptedFile(file.path)
+    val ciphertextB64 = com.pr0gramm3r101.utils.crypto.Base64.encode(encryptedBytes)
+    return DmCrypto.decryptEnvelope(nonceB64, ciphertextB64, mek)
+}

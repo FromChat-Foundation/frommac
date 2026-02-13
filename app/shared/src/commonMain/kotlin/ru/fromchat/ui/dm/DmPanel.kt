@@ -146,6 +146,10 @@ class DmPanel(
         scope.launch(Dispatchers.Default) {
             val plaintext = runCatching { decryptEnvelope(envelope, currentUserId) }.getOrNull()
             if (plaintext != null) {
+                if (envelope.senderId == currentUserId) {
+                    val oldestOptimistic = _state.messages.filter { it.id < 0 }.minByOrNull { it.timestamp }
+                    oldestOptimistic?.let { removeMessage(it.id) }
+                }
                 addMessage(createMessage(envelope, plaintext))
                 if (envelope.replyToId != null) {
                     val replyTo = _state.messages.find { it.id == envelope.replyToId }
@@ -188,7 +192,9 @@ class DmPanel(
             verified = null,
             reply_to = null,
             client_message_id = null,
-            reactions = null
+            reactions = null,
+            files = envelope.files,
+            dmEnvelope = envelope
         )
     }
 
