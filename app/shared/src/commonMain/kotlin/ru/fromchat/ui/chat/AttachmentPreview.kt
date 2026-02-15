@@ -38,6 +38,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.compose.rememberAsyncImagePainter
+import com.pr0gramm3r101.utils.conditional
 import com.pr0gramm3r101.utils.crypto.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -64,24 +65,33 @@ fun AttachmentPreview(
     fileAspectRatio: Float? = null,
     modifier: Modifier = Modifier
 ) {
-    val isImage = file?.let { isImageFilename(it.name) } ?: pendingFileUri?.let {
-        it.contains("image", ignoreCase = true) || it.endsWith(".jpg", true) ||
-            it.endsWith(".png", true) || it.endsWith(".jpeg", true) ||
-            it.endsWith(".gif", true) || it.endsWith(".webp", true)
-    } ?: false
+    val isImage = when {
+        file != null -> isImageFilename(file.name)
+        pendingFileUri != null -> {
+            isImageFilename(
+                pendingFileUri
+                    .substringAfterLast('/')
+                    .substringBefore('?')
+            )
+        }
+        else -> false
+    }
 
-    val baseModifier = modifier
-        .then(
-            if (fileAspectRatio != null && fileAspectRatio > 0f) {
-                Modifier.aspectRatio(fileAspectRatio).sizeIn(maxWidth = IMAGE_SIZE, maxHeight = IMAGE_SIZE)
-            } else {
-                Modifier.size(IMAGE_SIZE)
-            }
-        )
-        .clip(RoundedCornerShape(IMAGE_RADIUS))
-        .background(MaterialTheme.colorScheme.surfaceVariant)
     Box(
-        modifier = baseModifier,
+        modifier = modifier
+            .conditional(
+                fileAspectRatio != null && fileAspectRatio > 0f,
+                `if` = {
+                    Modifier
+                        .aspectRatio(fileAspectRatio!!)
+                        .sizeIn(maxWidth = IMAGE_SIZE, maxHeight = IMAGE_SIZE)
+                },
+                `else` = {
+                    Modifier.size(IMAGE_SIZE)
+                }
+            )
+            .clip(RoundedCornerShape(IMAGE_RADIUS))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center
     ) {
         when {

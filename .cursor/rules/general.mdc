@@ -54,6 +54,11 @@ When working with the mobile app:
 - `GlobalScope.launch { }` for fire-and-forget background operations on iOS
 - Platform-specific logging with `ru.fromchat.core.Logger`
 
+## Modifier.conditional
+- Use `Modifier.conditional` when you need to apply different modifiers based on a condition.
+- Both `if` and `else` closures are `@Composable` and receive the current Modifier; they return a Modifier to be appended.
+- Source: `utils/shared/.../Compose.kt` — uses `composed { }`; when true applies `if`, when false applies `else` (default `{ Modifier }`).
+
 ## C Interop Gotchas
 - NSDictionaryAsKMap (Kotlin's internal NSDictionary wrapper) ≠ NSDictionary (Foundation object)
 - Security framework expects strict CFDictionaryRef types, not NSDictionary toll-free bridging
