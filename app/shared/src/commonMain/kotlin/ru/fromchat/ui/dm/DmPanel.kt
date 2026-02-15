@@ -5,6 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -75,17 +77,24 @@ class DmPanel(
             ApiClient.getDmHistory(otherUserId)
         }.onSuccess { response ->
             clearMessages()
-            response.messages.mapNotNull { envelope ->
+            val decryptedForLog = mutableListOf<Pair<Int, String>>()
+            val messages = response.messages.mapNotNull { envelope ->
                 decryptEnvelope(envelope, currentUserId)?.let { plaintext ->
+                    decryptedForLog.add(envelope.id to plaintext)
                     createMessage(envelope, plaintext)
                 }
-            }.forEach { addMessage(it) }
-            response.messages.forEach { envelope ->
-                if (envelope.replyToId != null) {
-                    val replyTo = _state.messages.find { it.id == envelope.replyToId }
-                    updateMessage(envelope.id) { it.copy(reply_to = replyTo) }
-                }
             }
+            decryptedForLog.takeLast(5).forEachIndexed { i, (id, json) ->
+                Logger.d("DmPanel", "Decrypted message #${i + 1} (id=$id): $json")
+            }
+            val replyToMap = messages.associateBy { it.id }
+            val messagesWithReplies = messages.map { msg ->
+                val envelope = response.messages.find { it.id == msg.id }
+                if (envelope?.replyToId != null) {
+                    msg.copy(reply_to = replyToMap[envelope.replyToId])
+                } else msg
+            }
+            addMessages(messagesWithReplies)
             setHasMoreMessages(false)
         }.onFailure { error ->
             Logger.e("DmPanel", "Failed to load DM history: ${error.message}", error)
@@ -167,14 +176,46 @@ class DmPanel(
         scope.launch(Dispatchers.Default) {
             val plaintext = runCatching { decryptEnvelope(envelope, currentUserId) }.getOrNull()
             if (plaintext != null) {
-                updateMessage(envelope.id) { it.copy(content = plaintext, is_edited = true) }
+                val (content, fileThumbnails, fileAspectRatios) = parseDecryptedContent(plaintext)
+                updateMessage(envelope.id) {
+                    it.copy(
+                        content = content,
+                        is_edited = true,
+                        fileThumbnails = fileThumbnails ?: it.fileThumbnails,
+                        fileAspectRatios = fileAspectRatios ?: it.fileAspectRatios
+                    )
+                }
             } else {
                 updateMessage(envelope.id) { it.copy(is_edited = true) }
             }
         }
     }
 
+    private fun parseDecryptedContent(plaintext: String): Triple<String, List<String>?, List<Float>?> {
+        return runCatching {
+            val obj = json.parseToJsonElement(plaintext).jsonObject
+            val text = obj["text"]?.jsonPrimitive?.content ?: return@runCatching Triple(plaintext, null, null)
+            val thumbArr = obj["fileThumbnails"]?.jsonArray ?: return@runCatching Triple(text, null, null)
+            val thumbnails = thumbArr.map { it.jsonPrimitive.content }
+            val arArr = obj["fileAspectRatios"]?.jsonArray
+            val aspectRatios = arArr?.mapNotNull { elem ->
+                val arr = elem as? JsonArray ?: return@mapNotNull null
+                if (arr.size == 2) {
+                    val w = (arr.getOrNull(0) as? JsonPrimitive)?.content?.toIntOrNull()
+                    val h = (arr.getOrNull(1) as? JsonPrimitive)?.content?.toIntOrNull()
+                    if (w != null && h != null && h > 0) w.toFloat() / h else null
+                } else null
+            }?.takeIf { it.size == thumbnails.size }
+            Logger.d("DmPanel", "parseDecryptedContent: thumbnails=${thumbnails.size} [${thumbnails.map { "len=${it.length}" }.joinToString()}], aspectRatios=${aspectRatios?.joinToString() ?: "null"}")
+            Triple(text, thumbnails.ifEmpty { null }, aspectRatios)
+        }.getOrElse {
+            Logger.d("DmPanel", "parseDecryptedContent: parse failed, using plaintext fallback")
+            Triple(plaintext, null, null)
+        }
+    }
+
     private fun createMessage(envelope: DmEnvelope, plaintext: String): Message {
+        val (content, fileThumbnails, fileAspectRatios) = parseDecryptedContent(plaintext)
         val username = if (envelope.senderId == currentUserId) {
             "You"
         } else {
@@ -183,7 +224,7 @@ class DmPanel(
         return Message(
             id = envelope.id,
             user_id = envelope.senderId,
-            content = plaintext,
+            content = content,
             timestamp = envelope.timestamp,
             is_read = envelope.recipientId == currentUserId,
             is_edited = false,
@@ -194,7 +235,9 @@ class DmPanel(
             client_message_id = null,
             reactions = null,
             files = envelope.files,
-            dmEnvelope = envelope
+            dmEnvelope = envelope,
+            fileThumbnails = fileThumbnails,
+            fileAspectRatios = fileAspectRatios
         )
     }
 

@@ -1,16 +1,19 @@
 package ru.fromchat.ui.chat
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
@@ -21,26 +24,26 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.compose.rememberAsyncImagePainter
+import com.pr0gramm3r101.utils.crypto.Base64
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import ru.fromchat.api.ApiClient
 import ru.fromchat.api.DmEnvelope
 import ru.fromchat.api.DmFile
+import ru.fromchat.core.Logger
 import ru.fromchat.crypto.decryptFile
 
 private val IMAGE_SIZE = 160.dp
@@ -57,6 +60,8 @@ fun AttachmentPreview(
     currentUserId: Int?,
     pendingFileUri: String?,
     isUploading: Boolean,
+    fileThumbnail: String? = null,
+    fileAspectRatio: Float? = null,
     modifier: Modifier = Modifier
 ) {
     val isImage = file?.let { isImageFilename(it.name) } ?: pendingFileUri?.let {
@@ -65,32 +70,45 @@ fun AttachmentPreview(
             it.endsWith(".gif", true) || it.endsWith(".webp", true)
     } ?: false
 
+    val baseModifier = modifier
+        .then(
+            if (fileAspectRatio != null && fileAspectRatio > 0f) {
+                Modifier.aspectRatio(fileAspectRatio).sizeIn(maxWidth = IMAGE_SIZE, maxHeight = IMAGE_SIZE)
+            } else {
+                Modifier.size(IMAGE_SIZE)
+            }
+        )
+        .clip(RoundedCornerShape(IMAGE_RADIUS))
+        .background(MaterialTheme.colorScheme.surfaceVariant)
     Box(
-        modifier = modifier
-            .size(IMAGE_SIZE)
-            .clip(RoundedCornerShape(IMAGE_RADIUS))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+        modifier = baseModifier,
         contentAlignment = Alignment.Center
     ) {
         when {
             pendingFileUri != null -> {
+                Logger.d("AttachmentPreview", "Rendering: pendingFileUri, isUploading=$isUploading")
                 PendingImageContent(
                     uri = pendingFileUri,
                     isUploading = isUploading,
                     isImage = isImage
                 )
             }
-            file != null && isImage && dmEnvelope != null -> {
+            file != null && isImage && dmEnvelope != null && !fileThumbnail.isNullOrBlank() -> {
+                Logger.d("AttachmentPreview", "Rendering: DecryptedImageContent file=${file.name} thumbLen=${fileThumbnail.length} aspectRatio=$fileAspectRatio")
                 DecryptedImageContent(
                     file = file,
                     envelope = dmEnvelope,
-                    currentUserId = currentUserId
+                    currentUserId = currentUserId,
+                    thumbnailBase64 = fileThumbnail,
+                    aspectRatio = fileAspectRatio
                 )
             }
             file != null && !isImage -> {
+                Logger.d("AttachmentPreview", "Rendering: FileIconContent file=${file.name}")
                 FileIconContent(filename = file.name)
             }
             else -> {
+                Logger.d("AttachmentPreview", "Rendering: fallback Icon (file=$file, isImage=$isImage, hasEnvelope=${dmEnvelope != null}, thumbBlank=${fileThumbnail.isNullOrBlank()})")
                 Icon(
                     imageVector = Icons.Default.Image,
                     contentDescription = null,
@@ -165,65 +183,95 @@ private fun InfiniteCircularProgress() {
 private fun DecryptedImageContent(
     file: DmFile,
     envelope: DmEnvelope,
-    currentUserId: Int?
+    currentUserId: Int?,
+    thumbnailBase64: String,
+    aspectRatio: Float?
 ) {
-    var thumbnailBytes by remember(file.path) { mutableStateOf<ByteArray?>(null) }
     var fullBytes by remember(file.path) { mutableStateOf<ByteArray?>(null) }
-    var imageReadyToUnblur by remember(file.path) { mutableStateOf(false) }
+    val thumbnailBytes = remember(thumbnailBase64) {
+        runCatching { Base64.decode(thumbnailBase64) }.getOrNull()
+    }
 
     LaunchedEffect(file.path) {
+        Logger.d("AttachmentPreview", "DecryptedImageContent: fetching full image path=${file.path}")
         withContext(Dispatchers.Default) {
-            coroutineScope {
-                val thumbDeferred = async {
-                    ApiClient.fetchThumbnail(file.path)
-                }
-                val fullDeferred = async {
-                    runCatching { decryptFile(file, envelope, currentUserId) }.getOrNull()
-                }
-                thumbnailBytes = thumbDeferred.await()
-                fullBytes = fullDeferred.await()
-            }
+            fullBytes = runCatching { decryptFile(file, envelope, currentUserId) }.getOrNull()
+            Logger.d("AttachmentPreview", "DecryptedImageContent: full image fetch done path=${file.path} success=${fullBytes != null} size=${fullBytes?.size ?: 0}")
         }
     }
-
-    val hasThumb = thumbnailBytes != null
-    val hasFull = fullBytes != null
-    val showContent = hasThumb || hasFull
-
-    if (!showContent) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            CircularProgressIndicator(modifier = Modifier.size(24.dp))
-        }
-        return
-    }
-
-    LaunchedEffect(hasFull) {
-        if (hasFull) {
-            delay(80)
-            imageReadyToUnblur = true
-        }
-    }
-    val blurProgress by animateFloatAsState(
-        targetValue = if (imageReadyToUnblur) 0f else 1f,
-        animationSpec = tween(300),
-        label = "blur"
-    )
-    val blurRadius = with(LocalDensity.current) { (blurProgress * 8.dp.toPx()).toDp() }
-    val displayBytes = fullBytes ?: thumbnailBytes!!
 
     Box(modifier = Modifier.fillMaxSize()) {
-        AsyncImage(
-            model = displayBytes,
-            contentDescription = file.name,
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(RoundedCornerShape(IMAGE_RADIUS))
-                .then(if (blurProgress > 0.01f) Modifier.blur(blurRadius) else Modifier),
-            contentScale = ContentScale.Crop
-        )
+        when {
+            thumbnailBytes == null -> {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    InfiniteCircularProgress()
+                }
+            }
+            else -> {
+                val thumbPainter = rememberAsyncImagePainter(
+                    model = thumbnailBytes,
+                    contentScale = ContentScale.Crop
+                )
+                val thumbState by thumbPainter.state.collectAsState()
+                when (thumbState) {
+                    is coil3.compose.AsyncImagePainter.State.Loading -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            InfiniteCircularProgress()
+                        }
+                    }
+                    is coil3.compose.AsyncImagePainter.State.Success -> {
+                        Image(
+                            painter = thumbPainter,
+                            contentDescription = file.name,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(IMAGE_RADIUS))
+                                .blur(8.dp),
+                            contentScale = ContentScale.Crop
+                        )
+                        if (fullBytes != null) {
+                            val fullPainter = rememberAsyncImagePainter(
+                                model = fullBytes,
+                                contentScale = ContentScale.Crop
+                            )
+                            val fullState by fullPainter.state.collectAsState()
+                            when (fullState) {
+                                is coil3.compose.AsyncImagePainter.State.Success -> {
+                                    val alpha = remember { Animatable(0f) }
+                                    LaunchedEffect(Unit) {
+                                        alpha.animateTo(1f, animationSpec = tween(300))
+                                    }
+                                    Image(
+                                        painter = fullPainter,
+                                        contentDescription = file.name,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(IMAGE_RADIUS))
+                                            .alpha(alpha.value),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+                                else -> { }
+                            }
+                        }
+                    }
+                    else -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            InfiniteCircularProgress()
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

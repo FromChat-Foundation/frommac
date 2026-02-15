@@ -101,7 +101,11 @@ data class Message(
     /** For optimistic UI: 0-100 upload progress, null when complete. */
     val uploadProgress: Int? = null,
     /** For DM file decryption; not serialized over network. */
-    @kotlinx.serialization.Transient val dmEnvelope: DmEnvelope? = null
+    @kotlinx.serialization.Transient val dmEnvelope: DmEnvelope? = null,
+    /** Blurhashes for image files (by index); from decrypted message JSON. */
+    @kotlinx.serialization.Transient val fileThumbnails: List<String>? = null,
+    /** Aspect ratios (width/height) for image files (by index); from decrypted message JSON. */
+    @kotlinx.serialization.Transient val fileAspectRatios: List<Float>? = null
 )
 
 @Serializable

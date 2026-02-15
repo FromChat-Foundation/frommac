@@ -334,10 +334,9 @@ object ApiClient {
     /**
      * Fetch encrypted file bytes. Path is e.g. "/uploads/files/encrypted/xxx.jpg" or "/api/uploads/files/encrypted/xxx.jpg".
      * Backend may return path with /api prefix; apiBaseUrl already includes /api, so we avoid double /api.
-     * @param thumb if true, appends ?thumb=1 for thumbnail (JPEG, ~5 KB)
      */
-    suspend fun fetchEncryptedFile(path: String, thumb: Boolean = false): ByteArray {
-        val baseUrl = when {
+    suspend fun fetchEncryptedFile(path: String): ByteArray {
+        val url = when {
             path.startsWith("http") -> path
             path.startsWith("/api") -> {
                 val serverBase = Config.apiBaseUrl.removeSuffix("/api")
@@ -345,16 +344,8 @@ object ApiClient {
             }
             else -> "${Config.apiBaseUrl}$path"
         }
-        val url = if (thumb) "$baseUrl?thumb=1" else baseUrl
         return http.get(url).body()
     }
-
-    /**
-     * Fetch thumbnail for an image file. Returns null if thumbnail not available (404).
-     */
-    suspend fun fetchThumbnail(path: String): ByteArray? = runCatching {
-        fetchEncryptedFile(path, thumb = true)
-    }.getOrNull()
 
     /**
      * Edit an existing direct message using the same transport encryption scheme as /dm/send.

@@ -104,6 +104,24 @@ abstract class ChatPanel(
     }
 
     /**
+     * Add multiple messages at once. Use when loading history so the list is not shown
+     * until all messages (including thumbnails) are ready.
+     */
+    suspend fun addMessages(messages: List<Message>) {
+        if (messages.isEmpty()) return
+        addMessageMutex.withLock {
+            val existingIds = _state.messages.mapTo(mutableSetOf()) { it.id }
+            val newOnes = messages.filter { it.id !in existingIds }
+            if (newOnes.isNotEmpty()) {
+                updateState { currentState ->
+                    val newMessages = (currentState.messages + newOnes).sortedBy { it.timestamp }
+                    currentState.copy(messages = newMessages)
+                }
+            }
+        }
+    }
+
+    /**
      * Update existing message (public for ChatScreen optimistic UI)
      */
     fun updateMessage(messageId: Int, updates: (Message) -> Message) {

@@ -211,13 +211,15 @@ fun MessageItem(
                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
                                 )
                             }
-                            message.files?.forEach { file ->
+                            message.files?.forEachIndexed { index, file ->
                                 AttachmentPreview(
                                     file = file,
                                     dmEnvelope = message.dmEnvelope,
                                     currentUserId = currentUserId,
                                     pendingFileUri = null,
                                     isUploading = false,
+                                    fileThumbnail = message.fileThumbnails?.getOrNull(index)?.takeIf { it.isNotBlank() },
+                                    fileAspectRatio = message.fileAspectRatios?.getOrNull(index)?.takeIf { it > 0f },
                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
                                 )
                             }
