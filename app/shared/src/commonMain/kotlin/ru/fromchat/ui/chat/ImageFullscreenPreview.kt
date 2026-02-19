@@ -47,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -56,16 +57,26 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import ru.fromchat.api.Message
+import ru.fromchat.ui.BackHandler
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 private val MENU_BG_ALPHA = 0.5f
+
+private data class InitialTransform(
+    val scale: Float,
+    val offsetX: Float,
+    val offsetY: Float,
+    val cornerRadius: Float,
+    val bgAlpha: Float
+)
 
 @OptIn(ExperimentalTime::class)
 private fun formatDateTime(timestamp: String): String {
@@ -92,10 +103,12 @@ fun ImageFullscreenPreview(
     onReply: (Message) -> Unit,
     onDelete: (Message) -> Unit,
     onSave: (Message, Int) -> Unit,
+    onClosingChange: (Boolean) -> Unit = {},
     sharedTransitionScope: SharedTransitionScope?,
     animatedVisibilityScope: AnimatedVisibilityScope?,
     sharedImageKey: Any? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    thumbnailBounds: Rect? = null
 ) {
     val file = message.files?.getOrNull(fileIndex) ?: return
     val envelope = message.dmEnvelope
@@ -116,11 +129,20 @@ fun ImageFullscreenPreview(
 
     var menusVisible by remember { mutableStateOf(true) }
     var dismissRequested by remember { mutableStateOf(false) }
+    val backgroundAlpha = remember { Animatable(1f) }
+    var hasPlayedOpenAnimation by remember(thumbnailBounds) { mutableStateOf(thumbnailBounds == null) }
+    val isInitialOpenState = thumbnailBounds != null && !hasPlayedOpenAnimation
+    val effectiveBackgroundAlpha = if (isInitialOpenState) 0f else backgroundAlpha.value
+    val effectiveMenusVisible = if (isInitialOpenState) false else menusVisible
+
+    BackHandler(enabled = true) {
+        dismissRequested = true
+    }
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(Color.Black.copy(alpha = effectiveBackgroundAlpha))
     ) {
         BoxWithConstraints(
             modifier = Modifier
@@ -145,14 +167,69 @@ fun ImageFullscreenPreview(
                     )
                 }
                 else -> {
-                    var scale by remember { mutableStateOf(1f) }
-                    var offset by remember { mutableStateOf(Offset.Zero) }
-                    val scaleAnim = remember { Animatable(1f) }
-                    val offsetXAnim = remember { Animatable(0f) }
-                    val offsetYAnim = remember { Animatable(0f) }
+                    val initial = remember(
+                        thumbnailBounds, containerWidth, containerHeight, contentHeightAtScale1
+                    ) {
+                        if (thumbnailBounds != null && fileAspectRatio != null) {
+                            val fullTop = (containerHeight - contentHeightAtScale1) / 2f
+                            val fullCenter = Offset(
+                                x = containerWidth / 2f,
+                                y = fullTop + contentHeightAtScale1 / 2f
+                            )
+                            val thumbCenter = thumbnailBounds.center
+                            val thumbWidth = thumbnailBounds.width
+                            val s = thumbWidth / containerWidth
+                            val o = thumbCenter - fullCenter
+                            InitialTransform(s, o.x, o.y, 8f, 0f)
+                        } else {
+                            InitialTransform(1f, 0f, 0f, 0f, 1f)
+                        }
+                    }
+                    var scale by remember { mutableStateOf(initial.scale) }
+                    var offset by remember { mutableStateOf(Offset(initial.offsetX, initial.offsetY)) }
+                    val scaleAnim = remember { Animatable(initial.scale) }
+                    val offsetXAnim = remember { Animatable(initial.offsetX) }
+                    val offsetYAnim = remember { Animatable(initial.offsetY) }
+                    val cornerRadiusAnim = remember { Animatable(initial.cornerRadius) }
                     val state = rememberTransformableState { zoomChange, offsetChange, _ ->
                         scale = (scale * zoomChange).coerceIn(1f, 12f)
                         offset += offsetChange
+                    }
+
+                    LaunchedEffect(thumbnailBounds) {
+                        if (thumbnailBounds != null && !hasPlayedOpenAnimation) {
+                            hasPlayedOpenAnimation = true
+
+                            val fullTop = (containerHeight - contentHeightAtScale1) / 2f
+                            val fullCenter = Offset(
+                                x = containerWidth / 2f,
+                                y = fullTop + contentHeightAtScale1 / 2f
+                            )
+                            val thumbCenter = thumbnailBounds.center
+                            val thumbWidth = thumbnailBounds.width
+
+                            val startScale = thumbWidth / containerWidth
+                            val startOffset = thumbCenter - fullCenter
+
+                            scale = startScale
+                            offset = startOffset
+                            scaleAnim.snapTo(startScale)
+                            offsetXAnim.snapTo(startOffset.x)
+                            offsetYAnim.snapTo(startOffset.y)
+                            cornerRadiusAnim.snapTo(8f)
+                            backgroundAlpha.snapTo(0f)
+                            menusVisible = false
+
+                            coroutineScope {
+                                launch { scaleAnim.animateTo(1f, tween(250)) }
+                                launch { offsetXAnim.animateTo(0f, tween(250)) }
+                                launch { offsetYAnim.animateTo(0f, tween(250)) }
+                                launch { cornerRadiusAnim.animateTo(0f, tween(250)) }
+                                launch { backgroundAlpha.animateTo(1f, tween(250)) }
+                            }
+
+                            menusVisible = true
+                        }
                     }
 
                     LaunchedEffect(dismissRequested) {
@@ -162,14 +239,50 @@ fun ImageFullscreenPreview(
                             offsetXAnim.value != 0f ||
                             offsetYAnim.value != 0f
 
-                        if (hasTransform) {
+                        if (thumbnailBounds != null) {
+                            menusVisible = false
+
+                            val fullTop = (containerHeight - contentHeightAtScale1) / 2f
+                            val fullCenter = Offset(
+                                x = containerWidth / 2f,
+                                y = fullTop + contentHeightAtScale1 / 2f
+                            )
+                            val thumbCenter = thumbnailBounds.center
+                            val thumbWidth = thumbnailBounds.width
+
+                            val targetScale = thumbWidth / containerWidth
+                            val targetOffset = thumbCenter - fullCenter
+
+                            scaleAnim.snapTo(scale)
+                            offsetXAnim.snapTo(offset.x)
+                            offsetYAnim.snapTo(offset.y)
+                            cornerRadiusAnim.snapTo(0f)
+
                             coroutineScope {
-                                launch { scaleAnim.animateTo(1f, tween(220)) }
-                                launch { offsetXAnim.animateTo(0f, tween(220)) }
-                                launch { offsetYAnim.animateTo(0f, tween(220)) }
+                                launch { scaleAnim.animateTo(targetScale, tween(250)) }
+                                launch { offsetXAnim.animateTo(targetOffset.x, tween(250)) }
+                                launch { offsetYAnim.animateTo(targetOffset.y, tween(250)) }
+                                launch { cornerRadiusAnim.animateTo(8f, tween(250)) }
+                                launch { backgroundAlpha.animateTo(0f, tween(250)) }
+                            }
+                        } else {
+                            if (hasTransform) {
+                                menusVisible = false
+                                coroutineScope {
+                                    launch { scaleAnim.animateTo(1f, tween(220)) }
+                                    launch { offsetXAnim.animateTo(0f, tween(220)) }
+                                    launch { offsetYAnim.animateTo(0f, tween(220)) }
+                                    launch { cornerRadiusAnim.animateTo(0f, tween(220)) }
+                                    launch { backgroundAlpha.animateTo(0f, tween(220)) }
+                                }
+                            } else {
+                                backgroundAlpha.animateTo(0f, tween(220))
                             }
                         }
 
+                        onClosingChange(true)
+                        delay(50)
+                        onClosingChange(false)
                         onDismiss()
                     }
                     LaunchedEffect(scale, offset, state.isTransformInProgress) {
@@ -238,6 +351,8 @@ fun ImageFullscreenPreview(
                                     .graphicsLayer {
                                         scaleX = scaleAnim.value
                                         scaleY = scaleAnim.value
+                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(cornerRadiusAnim.value.dp)
+                                        clip = cornerRadiusAnim.value > 0f
                                     },
                                 contentScale = ContentScale.FillWidth
                             )
@@ -249,7 +364,7 @@ fun ImageFullscreenPreview(
 
         // Top bar: back, display name + date/time, 3-dot menu
         AnimatedVisibility(
-            visible = menusVisible,
+            visible = effectiveMenusVisible,
             enter = androidx.compose.animation.fadeIn(),
             exit = androidx.compose.animation.fadeOut(),
             modifier = Modifier
@@ -349,7 +464,7 @@ fun ImageFullscreenPreview(
 
         // Bottom: message text
         AnimatedVisibility(
-            visible = menusVisible && message.content.isNotBlank(),
+            visible = effectiveMenusVisible && message.content.isNotBlank(),
             enter = androidx.compose.animation.fadeIn(),
             exit = androidx.compose.animation.fadeOut(),
             modifier = Modifier

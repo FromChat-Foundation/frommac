@@ -3,7 +3,6 @@ package ru.fromchat.ui.chat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -43,6 +42,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -184,10 +184,9 @@ fun ChatScreen(
         )
     }
     var expandedImage by remember { mutableStateOf<Pair<Message, Int>?>(null) }
-
-    BackHandler(enabled = expandedImage != null) {
-        expandedImage = null
-    }
+    var isImageClosing by remember { mutableStateOf(false) }
+    val imageThumbBounds = remember { mutableStateMapOf<String, Rect>() }
+    val expandedImageKey = expandedImage?.let { (msg, idx) -> "img_${msg.id}_$idx" }
 
     // Collect WebSocket messages
     LaunchedEffect(Unit) {
@@ -301,364 +300,365 @@ fun ChatScreen(
         }
     }
 
-    AnimatedContent(
-        targetState = expandedImage,
-        modifier = Modifier.fillMaxSize(),
-        transitionSpec = {
-            fadeIn(animationSpec = tween(300)) togetherWith ExitTransition.None
-        },
-        label = "image_fullscreen"
-    ) { expanded ->
-        if (expanded == null) {
-            Scaffold(
-                modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-                topBar = {
-                    TopAppBar(
-                        title = {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .scaleOnPress(
-                                        scale = 0.96f,
-                                        onClick = if (profileUserId != null && onTitleClick != null) {
-                                            { onTitleClick() }
-                                        } else null
-                                    ),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                when {
-                                    sharedAvatarKey != null && sharedTransitionScope != null && animatedVisibilityScope != null -> {
-                                        val avatar = panelState.titleAvatar
-                                        val displayName = avatar?.displayName?.takeIf { it.isNotBlank() }
-                                            ?: panelState.title.takeIf { it.isNotBlank() }
-                                            ?: "?"
-                                        with(sharedTransitionScope) {
-                                            Avatar(
-                                                profilePictureUrl = avatar?.profilePictureUrl,
-                                                displayName = displayName,
-                                                modifier = Modifier
-                                                    .sharedElement(
-                                                        rememberSharedContentState(key = sharedAvatarKey),
-                                                        animatedVisibilityScope = animatedVisibilityScope
-                                                    )
-                                                    .size(36.dp)
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                    }
-                                    !hideTitleBarAvatar -> {
-                                        panelState.titleAvatar?.let { avatar ->
-                                            Avatar(
-                                                profilePictureUrl = avatar.profilePictureUrl,
-                                                displayName = avatar.displayName,
-                                                modifier = Modifier.size(36.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                        }
-                                    }
-                                    onAvatarSlotBounds != null -> {
-                                        Box(
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .scaleOnPress(
+                                    scale = 0.96f,
+                                    onClick = if (profileUserId != null && onTitleClick != null) {
+                                        { onTitleClick() }
+                                    } else null
+                                ),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            when {
+                                sharedAvatarKey != null && sharedTransitionScope != null && animatedVisibilityScope != null -> {
+                                    val avatar = panelState.titleAvatar
+                                    val displayName = avatar?.displayName?.takeIf { it.isNotBlank() }
+                                        ?: panelState.title.takeIf { it.isNotBlank() }
+                                        ?: "?"
+                                    with(sharedTransitionScope) {
+                                        Avatar(
+                                            profilePictureUrl = avatar?.profilePictureUrl,
+                                            displayName = displayName,
                                             modifier = Modifier
+                                                .sharedElement(
+                                                    rememberSharedContentState(key = sharedAvatarKey),
+                                                    animatedVisibilityScope = animatedVisibilityScope
+                                                )
                                                 .size(36.dp)
-                                                .onGloballyPositioned { coords ->
-                                                    val pos = coords.positionInRoot()
-                                                    val sz = coords.size
-                                                    onAvatarSlotBounds(
-                                                        Rect(
-                                                            pos.x,
-                                                            pos.y,
-                                                            pos.x + sz.width.toFloat(),
-                                                            pos.y + sz.height.toFloat()
-                                                        )
-                                                    )
-                                                }
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
+                                !hideTitleBarAvatar -> {
+                                    panelState.titleAvatar?.let { avatar ->
+                                        Avatar(
+                                            profilePictureUrl = avatar.profilePictureUrl,
+                                            displayName = avatar.displayName,
+                                            modifier = Modifier.size(36.dp)
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                     }
-                                    else -> {
-                                        panelState.titleAvatar?.let {
-                                            Spacer(modifier = Modifier.width(36.dp))
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                        }
+                                }
+                                onAvatarSlotBounds != null -> {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .onGloballyPositioned { coords ->
+                                                val pos = coords.positionInRoot()
+                                                val sz = coords.size
+                                                onAvatarSlotBounds(
+                                                    Rect(
+                                                        pos.x,
+                                                        pos.y,
+                                                        pos.x + sz.width.toFloat(),
+                                                        pos.y + sz.height.toFloat()
+                                                    )
+                                                )
+                                            }
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
+                                else -> {
+                                    panelState.titleAvatar?.let {
+                                        Spacer(modifier = Modifier.width(36.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
                                     }
                                 }
+                            }
 
-                                Column(Modifier.fillMaxWidth()) {
-                                    Text(
-                                        text = panelState.title,
-                                        style = MaterialTheme.typography.titleLarge
-                                    )
+                            Column(Modifier.fillMaxWidth()) {
+                                Text(
+                                    text = panelState.title,
+                                    style = MaterialTheme.typography.titleLarge
+                                )
 
-                                    AnimatedContent(
-                                        targetState = currentTypingUsers.isNotEmpty(),
-                                        transitionSpec = {
-                                            fadeIn() togetherWith fadeOut()
-                                        },
-                                        label = "typing_status"
-                                    ) { hasTyping ->
-                                        if (hasTyping) {
-                                            TypingIndicator(
-                                                typingUsers = currentTypingUsers.map { it.username },
-                                                modifier = Modifier.padding(top = 2.dp)
-                                            )
-                                        } else if (panelState.profileUserId != null) {
-                                            val userStatus = statusMap[panelState.profileUserId]
-                                            if (userStatus != null) {
-                                                val statusText = formatLastSeen(userStatus.online, userStatus.lastSeen)
-                                                if (statusText.isNotEmpty()) {
-                                                    Text(
-                                                        text = statusText,
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        modifier = Modifier.padding(top = 2.dp)
-                                                    )
-                                                }
+                                AnimatedContent(
+                                    targetState = currentTypingUsers.isNotEmpty(),
+                                    transitionSpec = {
+                                        fadeIn() togetherWith fadeOut()
+                                    },
+                                    label = "typing_status"
+                                ) { hasTyping ->
+                                    if (hasTyping) {
+                                        TypingIndicator(
+                                            typingUsers = currentTypingUsers.map { it.username },
+                                            modifier = Modifier.padding(top = 2.dp)
+                                        )
+                                    } else if (panelState.profileUserId != null) {
+                                        val userStatus = statusMap[panelState.profileUserId]
+                                        if (userStatus != null) {
+                                            val statusText = formatLastSeen(userStatus.online, userStatus.lastSeen)
+                                            if (statusText.isNotEmpty()) {
+                                                Text(
+                                                    text = statusText,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.padding(top = 2.dp)
+                                                )
                                             }
                                         }
                                     }
                                 }
                             }
-                        },
-                                navigationIcon = {
-                            IconButton(onClick = { navController.navigateUp() }) {
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { navController.navigateUp() }) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(Res.string.back)
+                            )
+                        }
+                    },
+                    actions = {
+                        if (panel.showCallButton()) {
+                            IconButton(onClick = { /* TODO: Handle call */ }) {
                                 Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = stringResource(Res.string.back)
+                                    imageVector = Icons.Default.Call,
+                                    contentDescription = "Call"
                                 )
                             }
-                        },
-                        actions = {
-                            if (panel.showCallButton()) {
-                                IconButton(onClick = { /* TODO: Handle call */ }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Call,
-                                        contentDescription = "Call"
-                                    )
-                                }
-                            }
-                        },
-                        scrollBehavior = scrollBehavior,
-                        modifier = Modifier.hazeEffect(
+                        }
+                    },
+                    scrollBehavior = scrollBehavior,
+                    modifier = Modifier.hazeEffect(
+                        state = hazeState,
+                        style = HazeMaterials.thin()
+                    ),
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = Color.Transparent
+                    )
+                )
+            },
+            bottomBar = {
+                Column(
+                    modifier = Modifier
+                        .windowInsetsPadding(WindowInsets.ime)
+                        .fillMaxWidth()
+                        .hazeEffect(
                             state = hazeState,
                             style = HazeMaterials.thin()
-                        ),
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = Color.Transparent,
-                            scrolledContainerColor = Color.Transparent
-                        )
-                    )
-                },
-                bottomBar = {
-                    Column( // New Column to hold ChatInput below the LazyColumn
-                        modifier = Modifier
-                            .windowInsetsPadding(WindowInsets.ime)
-                            .fillMaxWidth()
-                            .hazeEffect(
-                                state = hazeState,
-                                style = HazeMaterials.thin()
-                            ) {
-                                progressive = HazeProgressive.verticalGradient(
-                                    startIntensity = 0f,
-                                    endIntensity = 1f
-                                )
-                            }
-                    ) {
-                        ChatInput(
-                            text = inputText,
-                            onTextChange = { inputText = it },
-                            onSend = { text, attachments ->
-                                if (editingMessage != null) {
-                                    scope.launch {
-                                        panel.handleEditMessage(editingMessage!!.id, text)
-                                        editingMessage = null
-                                    }
-                                } else {
-                                    scope.launch {
-                                        val replyToId = replyTo?.id
-                                        val recipientId = panel.getRecipientId()
-                                        if (attachments.isNotEmpty() && recipientId != null) {
-                                            val plaintext = text.ifBlank { "" }
-                                            attachments.forEach { att ->
-                                                val jobId = "dm_${Clock.System.now().toEpochMilliseconds()}_${att.id}"
-                                                val tempId = -jobId.hashCode().let { if (it == 0) -1 else it }
-                                                val optimisticMessage = Message(
-                                                    id = tempId,
-                                                    user_id = currentUserId ?: -1,
-                                                    content = plaintext.ifBlank { att.filename },
-                                                    timestamp = Clock.System.now().toString(),
-                                                    is_read = false,
-                                                    is_edited = false,
-                                                    username = "You",
-                                                    profile_picture = null,
-                                                    verified = null,
-                                                    reply_to = replyTo,
-                                                    client_message_id = null,
-                                                    reactions = null,
-                                                    files = null,
-                                                    pendingFileUri = att.uri,
-                                                    uploadJobId = jobId,
-                                                    uploadProgress = 0
-                                                )
-                                                panel.addMessage(optimisticMessage)
-                                                AttachmentUploadQueue.enqueue(
-                                                    AttachmentUploadJob(
-                                                        jobId = jobId,
-                                                        fileUri = att.uri,
-                                                        filename = att.filename,
-                                                        recipientId = recipientId,
-                                                        plaintext = plaintext.ifBlank { att.filename },
-                                                        replyToId = replyToId
-                                                    )
-                                                )
-                                            }
-                                        } else if (text.isNotBlank()) {
-                                            panel.sendMessageWithImmediateDisplay(text, replyToId)
-                                        }
-                                        replyTo = null
-                                        haptic(HapticFeedbackEvent.MessageSent)
-                                    }
-                                }
-                                inputText = ""
-                            },
-                            typingHandler = panel.getTypingHandler(),
-                            replyTo = replyTo,
-                            editingMessage = editingMessage,
-                            onClearReply = { replyTo = null },
-                            onClearEdit = {
-                                editingMessage = null
-                                inputText = ""
-                            },
-                            hazeState = hazeState,
-                            recipientId = panel.getRecipientId()
-                        )
-                    }
-                }
-            ) { innerPadding ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) {
-                            detectTapGestures {
-                                // Close context menu on outside tap
-                                if (contextMenuState.isOpen) {
-                                    contextMenuState = contextMenuState.copy(isOpen = false)
-                                }
-                            }
+                        ) {
+                            progressive = HazeProgressive.verticalGradient(
+                                startIntensity = 0f,
+                                endIntensity = 1f
+                            )
                         }
                 ) {
-                    if (panelState.isLoading) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator()
-                        }
-                    } else {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(4.dp, alignment = Alignment.Bottom)
-                        ) {
-                            item { Spacer(Modifier.height(innerPadding.calculateTopPadding())) }
-
-                            items(
-                                items = panelState.messages,
-                                key = { it.id }
-                            ) { message ->
-                                var messagePosition by remember { mutableStateOf(IntOffset(0, 0)) }
-                                var tapOffset by remember { mutableStateOf(Offset(0f, 0f)) }
-
-                                Box(
-                                    modifier = Modifier
-                                        .hazeSource(hazeState)
-                                        .onGloballyPositioned { coordinates ->
-                                            messagePosition = IntOffset(
-                                                coordinates.positionInRoot().x.toInt(),
-                                                coordinates.positionInRoot().y.toInt()
+                    ChatInput(
+                        text = inputText,
+                        onTextChange = { inputText = it },
+                        onSend = { text, attachments ->
+                            if (editingMessage != null) {
+                                scope.launch {
+                                    panel.handleEditMessage(editingMessage!!.id, text)
+                                    editingMessage = null
+                                }
+                            } else {
+                                scope.launch {
+                                    val replyToId = replyTo?.id
+                                    val recipientId = panel.getRecipientId()
+                                    if (attachments.isNotEmpty() && recipientId != null) {
+                                        val plaintext = text.ifBlank { "" }
+                                        attachments.forEach { att ->
+                                            val jobId = "dm_${Clock.System.now().toEpochMilliseconds()}_${att.id}"
+                                            val tempId = -jobId.hashCode().let { if (it == 0) -1 else it }
+                                            val optimisticMessage = Message(
+                                                id = tempId,
+                                                user_id = currentUserId ?: -1,
+                                                content = plaintext.ifBlank { att.filename },
+                                                timestamp = Clock.System.now().toString(),
+                                                is_read = false,
+                                                is_edited = false,
+                                                username = "You",
+                                                profile_picture = null,
+                                                verified = null,
+                                                reply_to = replyTo,
+                                                client_message_id = null,
+                                                reactions = null,
+                                                files = null,
+                                                pendingFileUri = att.uri,
+                                                uploadJobId = jobId,
+                                                uploadProgress = 0
                                             )
-                                        }
-                                ) {
-                                    MessageItem(
-                                        message = message,
-                                        isAuthor = message.user_id == currentUserId,
-                                        currentUserId = currentUserId,
-                                        onLongPress = {
-                                            contextMenuState = ContextMenuState(
-                                                isOpen = true,
-                                                message = message,
-                                                position = IntOffset(
-                                                    messagePosition.x + tapOffset.x.toInt(),
-                                                    messagePosition.y + tapOffset.y.toInt()
+                                            panel.addMessage(optimisticMessage)
+                                            AttachmentUploadQueue.enqueue(
+                                                AttachmentUploadJob(
+                                                    jobId = jobId,
+                                                    fileUri = att.uri,
+                                                    filename = att.filename,
+                                                    recipientId = recipientId,
+                                                    plaintext = plaintext.ifBlank { att.filename },
+                                                    replyToId = replyToId
                                                 )
                                             )
-                                        },
-                                        onTapPosition = { offset ->
-                                            tapOffset = offset
-                                        },
-                                        onImageClick = { msg, idx -> expandedImage = msg to idx },
-                                        sharedTransitionScope = sharedTransitionScope,
-                                        animatedVisibilityScope = this@AnimatedContent,
-                                        showUsername = panel.showUsernamesInMessages
-                                    )
+                                        }
+                                    } else if (text.isNotBlank()) {
+                                        panel.sendMessageWithImmediateDisplay(text, replyToId)
+                                    }
+                                    replyTo = null
+                                    haptic(HapticFeedbackEvent.MessageSent)
                                 }
                             }
-
-                            item { Spacer(Modifier.height(innerPadding.calculateBottomPadding())) }
-                        }
-                    }
-
-                    @Suppress("AssignedValueIsNeverRead")
-                    MessageContextMenu(
-                        state = contextMenuState,
-                        isAuthor = contextMenuState.message?.user_id == currentUserId,
-                        onDismiss = { contextMenuState = contextMenuState.copy(isOpen = false) },
-                        onReply = { message ->
-                            replyTo = message
-                            if (editingMessage != null) {
-                                editingMessage = null
-                                inputText = ""
-                            }
+                            inputText = ""
                         },
-                        onEdit = { message ->
-                            editingMessage = message
-                            inputText = message.content
-                            replyTo = null
+                        typingHandler = panel.getTypingHandler(),
+                        replyTo = replyTo,
+                        editingMessage = editingMessage,
+                        onClearReply = { replyTo = null },
+                        onClearEdit = {
+                            editingMessage = null
+                            inputText = ""
                         },
-                        onDelete = { message ->
-                            scope.launch {
-                                panel.handleDeleteMessage(message.id)
-                            }
-                        },
+                        hazeState = hazeState,
+                        recipientId = panel.getRecipientId()
                     )
                 }
             }
-        } else {
-            expanded.let { (msg, idx) ->
-                ImageFullscreenPreview(
-                    message = msg,
-                    fileIndex = idx,
-                    currentUserId = currentUserId,
-                    onDismiss = { expandedImage = null },
-                    onReply = { m ->
-                        replyTo = m
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures {
+                            if (contextMenuState.isOpen) {
+                                contextMenuState = contextMenuState.copy(isOpen = false)
+                            }
+                        }
+                    }
+            ) {
+                if (panelState.isLoading) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp, alignment = Alignment.Bottom)
+                    ) {
+                        item { Spacer(Modifier.height(innerPadding.calculateTopPadding())) }
+
+                        items(
+                            items = panelState.messages,
+                            key = { it.id }
+                        ) { message ->
+                            var messagePosition by remember { mutableStateOf(IntOffset(0, 0)) }
+                            var tapOffset by remember { mutableStateOf(Offset(0f, 0f)) }
+
+                            Box(
+                                modifier = Modifier
+                                    .hazeSource(hazeState)
+                                    .onGloballyPositioned { coordinates ->
+                                        messagePosition = IntOffset(
+                                            coordinates.positionInRoot().x.toInt(),
+                                            coordinates.positionInRoot().y.toInt()
+                                        )
+                                    }
+                            ) {
+                                MessageItem(
+                                    message = message,
+                                    isAuthor = message.user_id == currentUserId,
+                                    onLongPress = {
+                                        contextMenuState = ContextMenuState(
+                                            isOpen = true,
+                                            message = message,
+                                            position = IntOffset(
+                                                messagePosition.x + tapOffset.x.toInt(),
+                                                messagePosition.y + tapOffset.y.toInt()
+                                            )
+                                        )
+                                    },
+                                    onTapPosition = { offset ->
+                                        tapOffset = offset
+                                    },
+                                    onImageClick = { msg, idx -> expandedImage = msg to idx },
+                                    onImageBounds = { key, rect ->
+                                        imageThumbBounds[key] = rect
+                                    },
+                                    expandedImageKey = expandedImageKey,
+                                    isImageClosing = isImageClosing,
+                                    showUsername = panel.showUsernamesInMessages,
+                                    currentUserId = currentUserId
+                                )
+                            }
+                        }
+
+                        item { Spacer(Modifier.height(innerPadding.calculateBottomPadding())) }
+                    }
+                }
+
+                @Suppress("AssignedValueIsNeverRead")
+                MessageContextMenu(
+                    state = contextMenuState,
+                    isAuthor = contextMenuState.message?.user_id == currentUserId,
+                    onDismiss = { contextMenuState = contextMenuState.copy(isOpen = false) },
+                    onReply = { message ->
+                        replyTo = message
                         if (editingMessage != null) {
                             editingMessage = null
                             inputText = ""
                         }
-                        expandedImage = null
                     },
-                    onDelete = { m ->
+                    onEdit = { message ->
+                        editingMessage = message
+                        inputText = message.content
+                        replyTo = null
+                    },
+                    onDelete = { message ->
                         scope.launch {
-                            panel.handleDeleteMessage(m.id)
+                            panel.handleDeleteMessage(message.id)
                         }
                     },
-                    onSave = { _, _ -> /* TODO: platform-specific save to gallery */ },
-                    sharedTransitionScope = sharedTransitionScope,
-                    animatedVisibilityScope = this@AnimatedContent,
-                    sharedImageKey = "img_${msg.id}_$idx",
-                    modifier = Modifier.fillMaxSize()
                 )
             }
+        }
+
+        expandedImage?.let { (msg, idx) ->
+            val key = "img_${msg.id}_$idx"
+            ImageFullscreenPreview(
+                message = msg,
+                fileIndex = idx,
+                currentUserId = currentUserId,
+                onDismiss = {
+                    isImageClosing = false
+                    expandedImage = null
+                },
+                onClosingChange = { isImageClosing = it },
+                onReply = { m ->
+                    replyTo = m
+                    if (editingMessage != null) {
+                        editingMessage = null
+                        inputText = ""
+                    }
+                    isImageClosing = false
+                    expandedImage = null
+                },
+                onDelete = { m ->
+                    scope.launch {
+                        panel.handleDeleteMessage(m.id)
+                    }
+                },
+                onSave = { _, _ -> /* TODO: platform-specific save to gallery */ },
+                sharedTransitionScope = null,
+                animatedVisibilityScope = null,
+                sharedImageKey = null,
+                modifier = Modifier.fillMaxSize(),
+                thumbnailBounds = imageThumbBounds[key]
+            )
         }
     }
 }

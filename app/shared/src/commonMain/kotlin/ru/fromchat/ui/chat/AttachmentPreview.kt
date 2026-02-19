@@ -1,8 +1,6 @@
 package ru.fromchat.ui.chat
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -49,6 +47,8 @@ import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.withSaveLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -79,9 +79,8 @@ fun AttachmentPreview(
     fileIndex: Int? = null,
     onFileClick: (() -> Unit)? = null,
     onImageClick: (() -> Unit)? = null,
-    sharedImageKey: Any? = null,
-    sharedTransitionScope: SharedTransitionScope? = null,
-    animatedVisibilityScope: AnimatedVisibilityScope? = null,
+    onImageBounds: ((Rect) -> Unit)? = null,
+    isExpanded: Boolean = false,
     isAuthor: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -123,18 +122,10 @@ fun AttachmentPreview(
         }
         isImageWithThumb -> {
             var isFullyLoaded by remember { mutableStateOf(false) }
-            val sharedModifier = if (sharedImageKey != null && sharedTransitionScope != null && animatedVisibilityScope != null) {
-                with(sharedTransitionScope) {
-                    Modifier.sharedElement(
-                        rememberSharedContentState(key = sharedImageKey),
-                        animatedVisibilityScope = animatedVisibilityScope
-                    )
-                }
-            } else Modifier
             Box(
                 modifier = modifier
                     .then(
-                        if (onImageClick != null && isFullyLoaded) Modifier.clickable(onClick = onImageClick)
+                        if (onImageClick != null && isFullyLoaded && !isExpanded) Modifier.clickable(onClick = onImageClick)
                         else Modifier
                     )
                     .conditional(
@@ -148,23 +139,41 @@ fun AttachmentPreview(
                             Modifier.size(IMAGE_SIZE)
                         }
                     )
-                    .then(sharedModifier)
-                    .clip(RoundedCornerShape(IMAGE_RADIUS)),
+                    .clip(RoundedCornerShape(IMAGE_RADIUS))
+                    .then(
+                        if (onImageBounds != null) {
+                            Modifier.onGloballyPositioned { coords ->
+                                val pos = coords.positionInRoot()
+                                val size = coords.size
+                                onImageBounds(
+                                    Rect(
+                                        pos.x,
+                                        pos.y,
+                                        pos.x + size.width.toFloat(),
+                                        pos.y + size.height.toFloat()
+                                    )
+                                )
+                            }
+                        } else {
+                            Modifier
+                        }
+                    ),
                 contentAlignment = Alignment.Center
             ) {
-                DecryptedImageContent(
-                    messageId = messageId ?: -1,
-                    fileIndex = fileIndex ?: 0,
-                    file = file,
-                    envelope = dmEnvelope,
-                    currentUserId = currentUserId,
-                    thumbnailBase64 = fileThumbnail,
-                    aspectRatio = fileAspectRatio,
-                    sharedImageKey = sharedImageKey,
-                    sharedTransitionScope = sharedTransitionScope,
-                    animatedVisibilityScope = animatedVisibilityScope,
-                    onFullyLoaded = { isFullyLoaded = it }
-                )
+                if (!isExpanded) {
+                    DecryptedImageContent(
+                        messageId = messageId ?: -1,
+                        fileIndex = fileIndex ?: 0,
+                        file = file,
+                        envelope = dmEnvelope,
+                        currentUserId = currentUserId,
+                        thumbnailBase64 = fileThumbnail,
+                        aspectRatio = fileAspectRatio,
+                        onFullyLoaded = { isFullyLoaded = it }
+                    )
+                } else {
+                    Box(modifier = Modifier.fillMaxSize())
+                }
             }
         }
         isPendingImage -> {
@@ -264,9 +273,6 @@ private fun DecryptedImageContent(
     currentUserId: Int?,
     thumbnailBase64: String,
     aspectRatio: Float?,
-    sharedImageKey: Any? = null,
-    sharedTransitionScope: SharedTransitionScope? = null,
-    animatedVisibilityScope: AnimatedVisibilityScope? = null,
     onFullyLoaded: (Boolean) -> Unit = {}
 ) {
     var cachedPath by remember(messageId, fileIndex, file.path) {

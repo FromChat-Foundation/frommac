@@ -2,7 +2,6 @@ package ru.fromchat.ui.chat
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -34,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -64,11 +64,12 @@ fun MessageItem(
     onLongPress: () -> Unit,
     onTapPosition: (Offset) -> Unit = {},
     onImageClick: ((Message, Int) -> Unit)? = null,
-    sharedTransitionScope: SharedTransitionScope? = null,
-    animatedVisibilityScope: AnimatedVisibilityScope? = null,
+    onImageBounds: ((String, Rect) -> Unit)? = null,
     modifier: Modifier = Modifier,
     showUsername: Boolean = true,
-    currentUserId: Int? = null
+    currentUserId: Int? = null,
+    expandedImageKey: String? = null,
+    isImageClosing: Boolean = false
 ) {
     AnimatedVisibility(
         visible = true,
@@ -241,6 +242,7 @@ fun MessageItem(
                                 }
                                 message.files?.forEachIndexed { index, file ->
                                     val isImage = isImageFilename(file.name)
+                                    val imageKey = if (isImage) "img_${message.id}_$index" else null
                                     AttachmentPreview(
                                         file = file,
                                         dmEnvelope = message.dmEnvelope,
@@ -252,11 +254,13 @@ fun MessageItem(
                                         fileSizeBytes = message.fileSizes?.getOrNull(index),
                                         messageId = if (isImage) message.id else null,
                                         fileIndex = if (isImage) index else null,
-                                        isAuthor = isAuthor,
+                                        onFileClick = null,
                                         onImageClick = if (isImage) { { onImageClick?.invoke(message, index) } } else null,
-                                        sharedImageKey = if (isImage && sharedTransitionScope != null && animatedVisibilityScope != null) "img_${message.id}_$index" else null,
-                                        sharedTransitionScope = sharedTransitionScope,
-                                        animatedVisibilityScope = animatedVisibilityScope,
+                                        onImageBounds = if (isImage && imageKey != null && onImageBounds != null) {
+                                            { rect -> onImageBounds.invoke(imageKey, rect) }
+                                        } else null,
+                                        isExpanded = isImage && expandedImageKey != null && expandedImageKey == imageKey && !isImageClosing,
+                                        isAuthor = isAuthor,
                                         modifier = Modifier.padding(
                                             horizontal = if (isImage) 2.dp else 12.dp,
                                             vertical = if (isImage) 2.dp else 4.dp
