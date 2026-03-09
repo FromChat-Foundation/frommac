@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -47,8 +49,8 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.materials.CupertinoMaterials
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
+import dev.chrisbanes.haze.materials.HazeMaterials
 import ru.fromchat.api.Message
 import ru.fromchat.ui.scaleOnPress
 
@@ -236,9 +238,6 @@ private fun ContextMenuContent(
 ) {
     val menuShape = RoundedCornerShape(16.dp)
     val menuScrollState = rememberScrollState()
-    val baseModifier = modifier.width(IntrinsicSize.Max)
-    val clipped = baseModifier.clip(menuShape)
-
     val density = LocalDensity.current
     val shadowElevationPx = if (withShadow) {
         with(density) { 12.dp.toPx() }
@@ -246,59 +245,82 @@ private fun ContextMenuContent(
         0f
     }
 
-    val finalModifier =
-        if (hazeState != null) {
-            clipped
-                .graphicsLayer(
-                    scaleX = if (animated) scale else 1f,
-                    scaleY = if (animated) scale else 1f,
-                    alpha = if (animated) alpha else 1f,
-                    transformOrigin = TransformOrigin(transformOriginX, transformOriginY),
-                    shadowElevation = shadowElevationPx,
-                    shape = menuShape,
-                    clip = true
-                )
-                .hazeEffect(state = hazeState, style = CupertinoMaterials.regular()) {
-                    blurRadius = 8.dp
-                }
+    val baseModifier = modifier.width(IntrinsicSize.Max)
+
+    // Container that scales around the finger pivot and owns the material
+    // bounds (shape + clipping) so the blur region exactly matches the card.
+    val animatedContainerModifier =
+        if (animated) {
+            baseModifier.graphicsLayer(
+                scaleX = scale,
+                scaleY = scale,
+                alpha = alpha,
+                transformOrigin = TransformOrigin(transformOriginX, transformOriginY),
+                shadowElevation = shadowElevationPx,
+                shape = menuShape,
+                clip = true
+            )
         } else {
-            clipped.graphicsLayer(
+            baseModifier.graphicsLayer(
                 shadowElevation = shadowElevationPx,
                 shape = menuShape,
                 clip = true
             )
         }
+
+    // Blur matches the material bounds from the parent, without its own transforms.
+    // Use a prebuilt material style, but with a transparent container color so we
+    // only get the blur characteristics, not an extra color wash.
+    val blurModifier =
+        if (hazeState != null) {
+            Modifier.hazeEffect(
+                state = hazeState,
+                style = HazeMaterials.thin(containerColor = Color.Transparent)
+            ) {
+                noiseFactor = 0f
+            }
+        } else {
+            Modifier
+        }
+
+    // Fully transparent tint so we only see the material blur underneath.
+    val contentBackgroundColor = MaterialTheme.colorScheme.surface.copy(alpha = 0f)
     val edgePadding = 8.dp
     val itemSpacing = 2.dp
 
-    Box(modifier = finalModifier) {
-        Column(
-            modifier = Modifier
-                .padding(horizontal = edgePadding, vertical = edgePadding)
-                .verticalScroll(menuScrollState),
-            verticalArrangement = Arrangement.spacedBy(itemSpacing)
+    Box(modifier = animatedContainerModifier) {
+        Box(
+            modifier = blurModifier
+                .background(contentBackgroundColor)
         ) {
-            ContextMenuItem(
-                icon = Icons.AutoMirrored.Filled.Reply,
-                text = "Reply",
-                onClick = {
-                    onReply(message)
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = edgePadding, vertical = edgePadding)
+                    .verticalScroll(menuScrollState),
+                verticalArrangement = Arrangement.spacedBy(itemSpacing)
+            ) {
+                ContextMenuItem(
+                    icon = Icons.AutoMirrored.Filled.Reply,
+                    text = "Reply",
+                    onClick = {
+                        onReply(message)
+                    }
+                )
+                if (isAuthor) {
+                    ContextMenuItem(
+                        icon = Icons.Default.Edit,
+                        text = "Edit",
+                        onClick = { onEdit(message) }
+                    )
                 }
-            )
-            if (isAuthor) {
-                ContextMenuItem(
-                    icon = Icons.Default.Edit,
-                    text = "Edit",
-                    onClick = { onEdit(message) }
-                )
-            }
-            if (isAuthor) {
-                ContextMenuItem(
-                    icon = Icons.Default.Delete,
-                    text = "Delete",
-                    onClick = { onDelete(message) },
-                    isError = true
-                )
+                if (isAuthor) {
+                    ContextMenuItem(
+                        icon = Icons.Default.Delete,
+                        text = "Delete",
+                        onClick = { onDelete(message) },
+                        isError = true
+                    )
+                }
             }
         }
     }
