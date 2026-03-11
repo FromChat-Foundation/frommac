@@ -96,6 +96,10 @@ data class Message(
     val files: List<DmFile>? = null,
     /** For optimistic UI: local URI when sending, null when confirmed. */
     val pendingFileUri: String? = null,
+    /** For optimistic UI: filename when sending file (non-image), null when confirmed. */
+    val pendingFilename: String? = null,
+    /** For optimistic UI: aspect ratio (width/height) when sending image, null when confirmed. */
+    val pendingFileAspectRatio: Float? = null,
     /** For optimistic UI: jobId to track upload progress. */
     val uploadJobId: String? = null,
     /** For optimistic UI: 0-100 upload progress, null when complete. */

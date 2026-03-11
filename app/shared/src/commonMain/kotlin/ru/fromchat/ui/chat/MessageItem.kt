@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -159,10 +160,16 @@ fun MessageItem(
                 ) {
                     // Message bubble
                     val isDark = isSystemInDarkTheme()
+                    val pendingIsImage = when {
+                        message.pendingFilename?.isNotBlank() == true -> isImageFilename(message.pendingFilename)
+                        message.pendingFileUri != null -> isImageFilename(
+                            message.pendingFileUri.substringAfterLast('/').substringBefore('?')
+                        )
+                        else -> false
+                    }
                     val firstContentIsImage = (!showUsername || isAuthor) &&
                         message.reply_to == null &&
-                        (message.pendingFileUri?.let { isImageFilename(it.substringAfterLast('/').substringBefore('?')) } == true ||
-                            message.files?.firstOrNull()?.let { isImageFilename(it.name) } == true)
+                        (pendingIsImage || message.files?.firstOrNull()?.let { isImageFilename(it.name) } == true)
                     Box(
                         modifier = Modifier
                             .graphicsLayer(
@@ -278,20 +285,61 @@ fun MessageItem(
                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                                 )
                             } else {
-                                if (message.pendingFileUri != null) {
+                                val firstFile = message.files?.firstOrNull()
+                                val firstFileIsImage = firstFile?.let { isImageFilename(it.name) } ?: false
+                                val isTransitioning = message.pendingFileUri != null && firstFileIsImage &&
+                                    message.dmEnvelope != null && !(message.fileThumbnails?.firstOrNull().isNullOrBlank())
+                                if (isTransitioning) {
+                                    val file = firstFile
+                                    val imageKey = "img_${message.id}_0"
+                                    AttachmentPreview(
+                                        file = file,
+                                        dmEnvelope = message.dmEnvelope,
+                                        currentUserId = currentUserId,
+                                        pendingFileUri = message.pendingFileUri,
+                                        pendingFilename = message.pendingFilename,
+                                        isUploading = false,
+                                        uploadProgress = null,
+                                        fileThumbnail = message.fileThumbnails!!.first().takeIf { it.isNotBlank() },
+                                        fileAspectRatio = message.fileAspectRatios?.firstOrNull()?.takeIf { it > 0f }
+                                            ?: message.pendingFileAspectRatio,
+                                        fileSizeBytes = message.fileSizes?.firstOrNull(),
+                                        messageId = message.id,
+                                        fileIndex = 0,
+                                        onFileClick = null,
+                                        onImageClick = { onImageClick?.invoke(message, 0) },
+                                        onImageBounds = if (onImageBounds != null) { rect -> onImageBounds.invoke(imageKey, rect) } else null,
+                                        isExpanded = expandedImageKey != null && expandedImageKey == imageKey && !isImageClosing,
+                                        isAuthor = isAuthor,
+                                        modifier = Modifier.padding(all = 2.dp)
+                                    )
+                                } else if (message.pendingFileUri != null) {
+                                    val isPendingImage = message.pendingFilename?.let { isImageFilename(it) } ?: false
                                     AttachmentPreview(
                                         file = null,
                                         dmEnvelope = null,
                                         currentUserId = null,
                                         pendingFileUri = message.pendingFileUri,
+                                        pendingFilename = message.pendingFilename,
                                         isUploading = message.uploadProgress != null,
+                                        uploadProgress = message.uploadProgress,
+                                        fileAspectRatio = message.pendingFileAspectRatio,
                                         isAuthor = isAuthor,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                                        modifier = if (isPendingImage && firstContentIsImage) {
+                                            Modifier.padding(all = 2.dp)
+                                        } else {
+                                            Modifier.padding(
+                                                horizontal = if (isPendingImage) 2.dp else 12.dp,
+                                                vertical = if (isPendingImage) 2.dp else 4.dp
+                                            )
+                                        }
                                     )
                                 }
                                 message.files?.forEachIndexed { index, file ->
+                                    if (isTransitioning && index == 0) return@forEachIndexed
                                     val isImage = isImageFilename(file.name)
                                     val imageKey = if (isImage) "img_${message.id}_$index" else null
+                                    val isFirstImage = index == 0 && isImage
                                     AttachmentPreview(
                                         file = file,
                                         dmEnvelope = message.dmEnvelope,
@@ -310,10 +358,14 @@ fun MessageItem(
                                         } else null,
                                         isExpanded = isImage && expandedImageKey != null && expandedImageKey == imageKey && !isImageClosing,
                                         isAuthor = isAuthor,
-                                        modifier = Modifier.padding(
-                                            horizontal = if (isImage) 2.dp else 12.dp,
-                                            vertical = if (isImage) 2.dp else 4.dp
-                                        )
+                                        modifier = if (isFirstImage && firstContentIsImage && isImage) {
+                                            Modifier.padding(all = 2.dp)
+                                        } else {
+                                            Modifier.padding(
+                                                horizontal = if (isImage) 2.dp else 12.dp,
+                                                vertical = if (isImage) 2.dp else 4.dp
+                                            )
+                                        }
                                     )
                                 }
                             }
@@ -330,13 +382,26 @@ fun MessageItem(
                                 )
                             }
 
-                            // Timestamp and edited indicator
+                            // Timestamp, sending indicator, and edited indicator
+                            val isSendingText = message.id < 0 && message.uploadJobId == null
                             Row(
                                 modifier = Modifier
                                     .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp),
                                 horizontalArrangement = Arrangement.End,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                if (isSendingText) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(12.dp),
+                                        strokeWidth = 1.5.dp,
+                                        color = if (isAuthor) {
+                                            Color.White.copy(alpha = 0.7f)
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                        }
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                }
                                 Text(
                                     text = formatTime(message.timestamp),
                                     style = MaterialTheme.typography.labelSmall,

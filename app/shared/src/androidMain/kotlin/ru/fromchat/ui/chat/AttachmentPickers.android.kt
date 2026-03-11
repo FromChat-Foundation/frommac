@@ -1,5 +1,6 @@
 package ru.fromchat.ui.chat
 
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -17,6 +18,18 @@ actual fun getFilenameFromUri(uri: String): String {
         }
     }
     return uri.substringAfterLast('/').takeIf { it.isNotBlank() } ?: "file"
+}
+
+actual suspend fun getImageAspectRatio(uri: String): Float? {
+    val context = com.pr0gramm3r101.utils.UtilsLibrary.context
+    context.contentResolver.openInputStream(Uri.parse(uri))?.use { stream ->
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeStream(stream, null, options)
+        val w = options.outWidth
+        val h = options.outHeight
+        if (w > 0 && h > 0) return w.toFloat() / h
+    }
+    return null
 }
 
 @Composable

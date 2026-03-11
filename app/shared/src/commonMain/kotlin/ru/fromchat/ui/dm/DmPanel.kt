@@ -158,9 +158,20 @@ class DmPanel(
             if (plaintext != null) {
                 if (envelope.senderId == currentUserId) {
                     val oldestOptimistic = _state.messages.filter { it.id < 0 }.minByOrNull { it.timestamp }
-                    oldestOptimistic?.let { removeMessage(it.id) }
+                    if (oldestOptimistic != null) {
+                        val real = createMessage(envelope, plaintext).copy(
+                            uploadJobId = oldestOptimistic.uploadJobId,
+                            pendingFileUri = oldestOptimistic.pendingFileUri,
+                            pendingFilename = oldestOptimistic.pendingFilename,
+                            pendingFileAspectRatio = oldestOptimistic.pendingFileAspectRatio
+                        )
+                        updateMessage(oldestOptimistic.id) { real }
+                    } else {
+                        addMessage(createMessage(envelope, plaintext))
+                    }
+                } else {
+                    addMessage(createMessage(envelope, plaintext))
                 }
-                addMessage(createMessage(envelope, plaintext))
                 if (envelope.replyToId != null) {
                     val replyTo = _state.messages.find { it.id == envelope.replyToId }
                     updateMessage(envelope.id) { it.copy(reply_to = replyTo) }

@@ -15,3 +15,5 @@ actual fun rememberImagePicker(onResult: (List<String>) -> Unit): () -> Unit {
 actual fun rememberFilePicker(onResult: (List<String>) -> Unit): () -> Unit {
     return { /* Phase 4: UIDocumentPickerViewController */ }
 }
+
+actual suspend fun getImageAspectRatio(uri: String): Float? = null

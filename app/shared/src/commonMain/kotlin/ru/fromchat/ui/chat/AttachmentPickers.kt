@@ -28,3 +28,6 @@ expect fun rememberFilePicker(onResult: (List<String>) -> Unit): () -> Unit
 
 /** Resolve display filename from content URI. Platform-specific. */
 expect fun getFilenameFromUri(uri: String): String
+
+/** Get image aspect ratio (width/height) from URI without loading full image. Returns null if unavailable. */
+expect suspend fun getImageAspectRatio(uri: String): Float?

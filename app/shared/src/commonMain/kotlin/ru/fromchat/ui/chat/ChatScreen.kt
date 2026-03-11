@@ -64,6 +64,7 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
 import dev.chrisbanes.haze.rememberHazeState
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
@@ -83,6 +84,7 @@ import ru.fromchat.core.Logger
 import ru.fromchat.ui.HapticFeedbackEvent
 import ru.fromchat.ui.LocalNavController
 import ru.fromchat.ui.rememberHapticFeedback
+import ru.fromchat.ui.chat.getImageAspectRatio
 import ru.fromchat.ui.scaleOnPress
 import ru.fromchat.utils.formatLastSeen
 import kotlin.time.Clock
@@ -259,24 +261,31 @@ fun ChatScreen(
 
     // Scroll to bottom when new messages arrive.
     // - Initial composition: jump (no animation) to avoid jank.
-    // - Subsequent messages: only auto-scroll if user is already near bottom.
+    // - Subsequent messages: always scroll when we sent (last message is ours); otherwise only if near bottom.
+    // - Scroll to last item (totalItemsCount - 1) so new message appears at bottom; delay to allow layout.
     var didInitialScroll by remember(panel) { mutableStateOf(false) }
-    LaunchedEffect(panelState.messages.size) {
+    LaunchedEffect(panelState.messages.size, panelState.messages.lastOrNull()?.id, panelState.messages.lastOrNull()?.pendingFileAspectRatio) {
         if (panelState.messages.isEmpty()) return@LaunchedEffect
 
-        val lastMessageIndex = panelState.messages.size // account for top spacer item at index 0
+        val lastMessage = panelState.messages.lastOrNull()
+        val lastIsOurs = lastMessage?.user_id == currentUserId
+        val totalItems = 2 + panelState.messages.size // top spacer + messages + bottom spacer
+        val lastIndex = totalItems - 1
 
         if (!didInitialScroll) {
             didInitialScroll = true
-            listState.scrollToItem(lastMessageIndex)
+            listState.scrollToItem(lastIndex)
             return@LaunchedEffect
         }
 
         val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        val totalItems = listState.layoutInfo.totalItemsCount
         val isNearBottom = lastVisibleIndex >= (totalItems - 3)
-        if (isNearBottom) {
-            listState.animateScrollToItem(lastMessageIndex)
+        if (lastIsOurs || isNearBottom) {
+            delay(100) // Allow new item to be composed and laid out
+            listState.animateScrollToItem(lastIndex)
+            // Re-scroll after layout may change (e.g. aspect ratio update)
+            delay(150)
+            listState.animateScrollToItem(lastIndex)
         }
     }
 
@@ -471,6 +480,7 @@ fun ChatScreen(
                                         attachments.forEach { att ->
                                             val jobId = "dm_${Clock.System.now().toEpochMilliseconds()}_${att.id}"
                                             val tempId = -jobId.hashCode().let { if (it == 0) -1 else it }
+                                            val isImage = att.isImage
                                             val optimisticMessage = Message(
                                                 id = tempId,
                                                 user_id = currentUserId ?: -1,
@@ -486,10 +496,21 @@ fun ChatScreen(
                                                 reactions = null,
                                                 files = null,
                                                 pendingFileUri = att.uri,
+                                                pendingFilename = att.filename,
                                                 uploadJobId = jobId,
                                                 uploadProgress = 0
                                             )
                                             panel.addMessage(optimisticMessage)
+                                            if (isImage) {
+                                                scope.launch {
+                                                    val aspectRatio = getImageAspectRatio(att.uri)
+                                                    if (aspectRatio != null && aspectRatio > 0f) {
+                                                        panel.updateMessage(tempId) {
+                                                            if (it.uploadJobId == jobId) it.copy(pendingFileAspectRatio = aspectRatio) else it
+                                                        }
+                                                    }
+                                                }
+                                            }
                                             AttachmentUploadQueue.enqueue(
                                                 AttachmentUploadJob(
                                                     jobId = jobId,
@@ -553,7 +574,7 @@ fun ChatScreen(
 
                         items(
                             items = panelState.messages,
-                            key = { it.id }
+                            key = { it.uploadJobId ?: it.id.toString() }
                         ) { message ->
                             var tapPositionInRoot by remember { mutableStateOf(IntOffset(0, 0)) }
 

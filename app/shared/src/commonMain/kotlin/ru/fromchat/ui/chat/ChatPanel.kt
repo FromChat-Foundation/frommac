@@ -86,6 +86,11 @@ abstract class ChatPanel(
     /**
      * Add message to list. Mutex prevents duplicate adds when same update
      * is processed concurrently from multiple WebSocket connections.
+     *
+     * Messages are appended in arrival order instead of being re-sorted.
+     * This guarantees that new optimistic messages and live updates always
+     * appear at the bottom, even if timestamps are slightly out of sync
+     * between client and server.
      */
     suspend fun addMessage(message: Message) {
         addMessageMutex.withLock {
@@ -93,7 +98,7 @@ abstract class ChatPanel(
             if (!messageExists) {
                 Logger.d("ChatPanel", "Adding message: id=${message.id}, content=${message.content.take(50)}")
                 updateState { currentState ->
-                    val newMessages = (currentState.messages + message).sortedBy { it.timestamp }
+                    val newMessages = currentState.messages + message
                     Logger.d("ChatPanel", "Messages count after add: ${newMessages.size}")
                     currentState.copy(messages = newMessages)
                 }
