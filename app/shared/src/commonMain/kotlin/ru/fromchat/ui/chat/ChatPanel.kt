@@ -295,6 +295,7 @@ abstract class ChatPanel(
             is_read = false,
             is_edited = false,
             username = "You",
+            client_message_id = tempId,
             reply_to = replyToId?.let { replyId ->
                 _state.messages.find { it.id == replyId }
             }

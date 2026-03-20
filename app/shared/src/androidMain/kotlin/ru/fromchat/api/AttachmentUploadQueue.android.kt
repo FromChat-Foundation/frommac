@@ -103,7 +103,7 @@ class DmAttachmentUploadWorker(
             val encryptedBlob = encryptFileBlob(fileUri)
 
             if (encryptedBlob.size <= INLINE_UPLOAD_THRESHOLD_BYTES) {
-                sendInline(recipientId, plaintext, filename, encryptedBlob)
+                sendInline(jobId, recipientId, plaintext, filename, encryptedBlob)
             } else {
                 sendResumable(jobId, recipientId, plaintext, filename, encryptedBlob)
             }
@@ -133,6 +133,7 @@ class DmAttachmentUploadWorker(
     }
 
     private suspend fun sendInline(
+        jobId: String,
         recipientId: Int,
         plaintext: String,
         filename: String,
@@ -146,6 +147,7 @@ class DmAttachmentUploadWorker(
         ApiClient.sendDm(
             recipientId = recipientId,
             plaintext = plaintext,
+            clientMessageId = jobId,
             transportFiles = listOf(file)
         )
     }
@@ -185,6 +187,7 @@ class DmAttachmentUploadWorker(
         ApiClient.sendDm(
             recipientId = recipientId,
             plaintext = plaintext,
+            clientMessageId = jobId,
             uploadedFileIds = listOf(completed.fileId)
         )
     }

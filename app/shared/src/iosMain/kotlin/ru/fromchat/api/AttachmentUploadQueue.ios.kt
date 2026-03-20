@@ -22,6 +22,7 @@ actual object AttachmentUploadQueue {
                 ApiClient.sendDm(
                     recipientId = job.recipientId,
                     plaintext = job.plaintext,
+                    clientMessageId = job.jobId,
                     replyToId = job.replyToId
                 )
             }.onSuccess {

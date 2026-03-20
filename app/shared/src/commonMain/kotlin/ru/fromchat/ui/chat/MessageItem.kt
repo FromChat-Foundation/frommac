@@ -286,43 +286,51 @@ fun MessageItem(
                             } else {
                                 val firstFile = message.files?.firstOrNull()
                                 val firstFileIsImage = firstFile?.let { isImageFilename(it.name) } ?: false
-                                val isTransitioning = message.pendingFileUri != null && firstFileIsImage &&
-                                    message.dmEnvelope != null && !(message.fileThumbnails?.firstOrNull().isNullOrBlank())
-                                if (isTransitioning) {
-                                    val file = firstFile
-                                    val imageKey = "img_${message.id}_0"
-                                    AttachmentPreview(
-                                        file = file,
-                                        dmEnvelope = message.dmEnvelope,
-                                        currentUserId = currentUserId,
-                                        pendingFileUri = message.pendingFileUri,
-                                        pendingFilename = message.pendingFilename,
-                                        isUploading = false,
-                                        uploadProgress = null,
-                                        fileThumbnail = message.fileThumbnails.first().takeIf { it.isNotBlank() },
-                                        fileAspectRatio = message.fileAspectRatios?.firstOrNull()?.takeIf { it > 0f }
-                                            ?: message.pendingFileAspectRatio,
-                                        fileSizeBytes = message.fileSizes?.firstOrNull(),
-                                        messageId = message.id,
-                                        fileIndex = 0,
-                                        onFileClick = null,
-                                        onImageClick = { onImageClick?.invoke(message, 0) },
-                                        onImageBounds = if (onImageBounds != null) { rect -> onImageBounds.invoke(imageKey, rect) } else null,
-                                        isExpanded = expandedImageKey != null && expandedImageKey == imageKey && !isImageClosing,
-                                        isAuthor = isAuthor,
-                                        modifier = Modifier.padding(all = 2.dp)
-                                    )
-                                } else if (message.pendingFileUri != null) {
+                                val hasPendingServerImage = message.pendingFileUri != null &&
+                                    firstFileIsImage &&
+                                    message.dmEnvelope != null
+                                if (message.pendingFileUri != null) {
                                     val isPendingImage = message.pendingFilename?.let { isImageFilename(it) } ?: false
+                                    val pendingImageFile = firstFile.takeIf { isPendingImage && hasPendingServerImage }
+                                    val imageKey = if (isPendingImage) "img_${message.id}_0" else null
                                     AttachmentPreview(
-                                        file = null,
-                                        dmEnvelope = null,
-                                        currentUserId = null,
+                                        file = pendingImageFile,
+                                        dmEnvelope = if (pendingImageFile != null) message.dmEnvelope else null,
+                                        currentUserId = if (pendingImageFile != null) currentUserId else null,
                                         pendingFileUri = message.pendingFileUri,
                                         pendingFilename = message.pendingFilename,
                                         isUploading = message.uploadProgress != null,
                                         uploadProgress = message.uploadProgress,
-                                        fileAspectRatio = message.pendingFileAspectRatio,
+                                        fileThumbnail = if (pendingImageFile != null) {
+                                            message.fileThumbnails?.firstOrNull()?.takeIf { it.isNotBlank() }
+                                        } else {
+                                            null
+                                        },
+                                        fileAspectRatio = if (pendingImageFile != null) {
+                                            message.fileAspectRatios?.firstOrNull()?.takeIf { it > 0f }
+                                                ?: message.pendingFileAspectRatio
+                                        } else {
+                                            message.pendingFileAspectRatio
+                                        },
+                                        fileSizeBytes = if (pendingImageFile != null) message.fileSizes?.firstOrNull() else null,
+                                        messageId = if (pendingImageFile != null && isPendingImage) message.id else null,
+                                        fileIndex = if (pendingImageFile != null && isPendingImage) 0 else null,
+                                        onFileClick = null,
+                                        onImageClick = if (isPendingImage && imageKey != null) {
+                                            { onImageClick?.invoke(message, 0) }
+                                        } else {
+                                            null
+                                        },
+                                        onImageBounds = if (isPendingImage && imageKey != null && onImageBounds != null) {
+                                            { rect -> onImageBounds.invoke(imageKey, rect) }
+                                        } else {
+                                            null
+                                        },
+                                        isExpanded = isPendingImage &&
+                                            imageKey != null &&
+                                            expandedImageKey != null &&
+                                            expandedImageKey == imageKey &&
+                                            !isImageClosing,
                                         isAuthor = isAuthor,
                                         modifier = if (isPendingImage && firstContentIsImage) {
                                             Modifier.padding(all = 2.dp)
@@ -335,7 +343,7 @@ fun MessageItem(
                                     )
                                 }
                                 message.files?.forEachIndexed { index, file ->
-                                    if (isTransitioning && index == 0) return@forEachIndexed
+                                    if (hasPendingServerImage && index == 0) return@forEachIndexed
                                     val isImage = isImageFilename(file.name)
                                     val imageKey = if (isImage) "img_${message.id}_$index" else null
                                     val isFirstImage = index == 0 && isImage

@@ -244,6 +244,7 @@ object ApiClient {
     suspend fun sendDm(
         recipientId: Int,
         plaintext: String,
+        clientMessageId: String? = null,
         replyToId: Int? = null,
         transportFiles: List<SendDmFile> = emptyList(),
         uploadedFileIds: List<String> = emptyList()
@@ -270,6 +271,7 @@ object ApiClient {
             transportCiphertextB64 = transportCipher.ciphertextB64,
             senderPublicKeyB64 = senderPublicKeyB64,
             recipientPublicKeyB64 = recipientPublicKey,
+            clientMessageId = clientMessageId,
             replyToId = replyToId,
             transportFiles = transportFiles,
             uploadedFileIds = uploadedFileIds

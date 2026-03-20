@@ -3,6 +3,8 @@ package ru.fromchat.ui.dm
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -36,6 +38,7 @@ class DmPanel(
     private val json = Json { ignoreUnknownKeys = true }
     private var otherDisplayName: String = "User $otherUserId"
     private var otherProfilePicture: String? = null
+    private val dmEnvelopeMutex = Mutex()
 
     init {
         updateState { it.copy(title = "Direct message", profileUserId = otherUserId) }
@@ -67,7 +70,12 @@ class DmPanel(
     }
 
     override suspend fun sendMessage(content: String, replyToId: Int?, clientMessageId: String?) {
-        ApiClient.sendDm(recipientId = otherUserId, plaintext = content, replyToId = replyToId)
+        ApiClient.sendDm(
+            recipientId = otherUserId,
+            plaintext = content,
+            clientMessageId = clientMessageId,
+            replyToId = replyToId
+        )
     }
 
     override suspend fun loadMessages() {
@@ -152,29 +160,83 @@ class DmPanel(
         }.getOrNull() ?: return
         if (envelope.senderId != otherUserId && envelope.recipientId != otherUserId) return
         scope.launch(Dispatchers.Default) {
-            val plaintext = runCatching { decryptEnvelope(envelope, currentUserId) }.getOrNull()
-            if (plaintext != null) {
-                if (envelope.senderId == currentUserId) {
-                    val oldestOptimistic = _state.messages.filter { it.id < 0 }.minByOrNull { it.timestamp }
-                    if (oldestOptimistic != null) {
-                        val real = createMessage(envelope, plaintext).copy(
-                            uploadJobId = oldestOptimistic.uploadJobId,
-                            pendingFileUri = oldestOptimistic.pendingFileUri,
-                            pendingFilename = oldestOptimistic.pendingFilename,
-                            pendingFileAspectRatio = oldestOptimistic.pendingFileAspectRatio
-                        )
-                        updateMessage(oldestOptimistic.id) { real }
+            dmEnvelopeMutex.withLock {
+                val alreadyExists = _state.messages.any { it.id == envelope.id }
+                val plaintext = runCatching { decryptEnvelope(envelope, currentUserId) }.getOrNull()
+
+                if (alreadyExists) return@withLock
+
+                if (plaintext != null) {
+                    if (envelope.senderId == currentUserId) {
+                        mergeConfirmedOwnMessage(envelope, plaintext)
                     } else {
                         addMessage(createMessage(envelope, plaintext))
                     }
-                } else {
-                    addMessage(createMessage(envelope, plaintext))
-                }
-                if (envelope.replyToId != null) {
-                    val replyTo = _state.messages.find { it.id == envelope.replyToId }
-                    updateMessage(envelope.id) { it.copy(reply_to = replyTo) }
+                    if (envelope.replyToId != null) {
+                        val replyTo = _state.messages.find { it.id == envelope.replyToId }
+                        updateMessage(envelope.id) { it.copy(reply_to = replyTo) }
+                    }
                 }
             }
+        }
+    }
+
+    private fun mergeConfirmedOwnMessage(envelope: DmEnvelope, plaintext: String) {
+        val confirmed = createMessage(envelope, plaintext)
+        val hasAttachments = !envelope.files.isNullOrEmpty()
+
+        updateState { currentState ->
+            val existingRealIndex = currentState.messages.indexOfFirst { it.id == envelope.id }
+            val exactOptimisticIndex = currentState.messages.indexOfFirst { message ->
+                message.user_id == currentUserId &&
+                    message.pendingFileUri != null &&
+                    envelope.clientMessageId != null &&
+                    (message.client_message_id == envelope.clientMessageId || message.uploadJobId == envelope.clientMessageId)
+            }
+            val optimisticIndex = if (exactOptimisticIndex >= 0) {
+                exactOptimisticIndex
+            } else {
+                currentState.messages.indexOfFirst { message ->
+                message.id < 0 &&
+                    message.user_id == currentUserId &&
+                    (message.pendingFileUri != null) == hasAttachments
+                }
+            }
+
+            val stateSource = when {
+                optimisticIndex >= 0 -> currentState.messages[optimisticIndex]
+                existingRealIndex >= 0 -> currentState.messages[existingRealIndex]
+                else -> null
+            }
+
+            val merged = confirmed.copy(
+                uploadJobId = stateSource?.uploadJobId,
+                pendingFileUri = stateSource?.pendingFileUri,
+                pendingFilename = stateSource?.pendingFilename,
+                pendingFileAspectRatio = stateSource?.pendingFileAspectRatio,
+                uploadProgress = stateSource?.uploadProgress
+            )
+
+            val newMessages = when {
+                optimisticIndex >= 0 -> {
+                    currentState.messages.mapIndexedNotNull { index, message ->
+                        when {
+                            index == optimisticIndex -> merged
+                            message.id == envelope.id -> null
+                            else -> message
+                        }
+                    }
+                }
+
+                existingRealIndex >= 0 -> {
+                    currentState.messages.mapIndexed { index, message ->
+                        if (index == existingRealIndex) merged else message
+                    }
+                }
+
+                else -> currentState.messages + merged
+            }
+            currentState.copy(messages = newMessages)
         }
     }
 
@@ -257,7 +319,7 @@ class DmPanel(
             profile_picture = null,
             verified = null,
             reply_to = null,
-            client_message_id = null,
+            client_message_id = envelope.clientMessageId,
             reactions = null,
             files = envelope.files,
             dmEnvelope = envelope,

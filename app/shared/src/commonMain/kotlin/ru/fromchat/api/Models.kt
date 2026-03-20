@@ -195,6 +195,7 @@ data class DmEnvelope(
     @SerialName("ciphertext_b64") val ciphertextB64: String,
     @SerialName("wrapped_mek_b64") val wrappedMekB64: String? = null,
     val timestamp: String,
+    @SerialName("client_message_id") val clientMessageId: String? = null,
     @SerialName("reply_to_id") val replyToId: Int? = null,
     val files: List<DmFile>? = null
 )
@@ -237,6 +238,7 @@ data class SendDmRequest(
     @SerialName("transport_ciphertext_b64") val transportCiphertextB64: String,
     @SerialName("sender_public_key_b64") val senderPublicKeyB64: String,
     @SerialName("recipient_public_key_b64") val recipientPublicKeyB64: String,
+    @SerialName("client_message_id") val clientMessageId: String? = null,
     @SerialName("reply_to_id") val replyToId: Int? = null,
     @SerialName("transport_files") val transportFiles: List<SendDmFile> = emptyList(),
     @SerialName("uploaded_file_ids") val uploadedFileIds: List<String> = emptyList()

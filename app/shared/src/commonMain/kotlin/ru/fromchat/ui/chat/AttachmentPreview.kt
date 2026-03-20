@@ -1,12 +1,17 @@
 package ru.fromchat.ui.chat
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,7 +31,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -175,22 +182,16 @@ fun AttachmentPreview(
             ) {
                 if (!isExpanded) {
                     when {
-                        isPendingImage && isImageWithThumb -> UnifiedImageContent(
+                        isPendingImage -> UnifiedImageContent(
                             localUri = pendingFileUri,
-                            messageId = messageId!!,
-                            fileIndex = fileIndex!!,
+                            messageId = messageId,
+                            fileIndex = fileIndex,
                             file = file,
                             envelope = dmEnvelope,
                             currentUserId = currentUserId,
-                            thumbnailBase64 = fileThumbnail,
-                            aspectRatio = fileAspectRatio,
-                            onFullyLoaded = { isFullyLoaded = it }
-                        )
-                        isPendingImage -> PendingImageContent(
-                            uri = pendingFileUri,
                             isUploading = isUploading,
                             uploadProgress = uploadProgress,
-                            isImage = true
+                            onFullyLoaded = { isFullyLoaded = it }
                         )
                         else -> DecryptedImageContent(
                             messageId = messageId ?: -1,
@@ -211,24 +212,35 @@ fun AttachmentPreview(
     }
 }
 
+@OptIn(ExperimentalHazeMaterialsApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun UnifiedImageContent(
     localUri: String,
-    messageId: Int,
-    fileIndex: Int,
-    file: DmFile,
-    envelope: DmEnvelope,
+    messageId: Int?,
+    fileIndex: Int?,
+    file: DmFile?,
+    envelope: DmEnvelope?,
     currentUserId: Int?,
-    thumbnailBase64: String,
-    aspectRatio: Float?,
+    isUploading: Boolean,
+    uploadProgress: Int?,
     onFullyLoaded: (Boolean) -> Unit = {}
 ) {
-    var cachedPath by remember(messageId, fileIndex, file.path) {
-        mutableStateOf(DecryptedImageCache.getCached(messageId, fileIndex, file.path))
+    var cachedPath by remember(messageId, fileIndex, file?.path) {
+        mutableStateOf(
+            if (messageId != null && fileIndex != null && file != null) {
+                DecryptedImageCache.getCached(messageId, fileIndex, file.path)
+            } else {
+                null
+            }
+        )
     }
 
-    LaunchedEffect(messageId, fileIndex, file.path, envelope) {
-        cachedPath = DecryptedImageCache.getOrDecrypt(messageId, fileIndex, file, envelope, currentUserId)
+    LaunchedEffect(messageId, fileIndex, file?.path, envelope) {
+        cachedPath = if (messageId != null && fileIndex != null && file != null && envelope != null) {
+            DecryptedImageCache.getOrDecrypt(messageId, fileIndex, file, envelope, currentUserId)
+        } else {
+            null
+        }
     }
     LaunchedEffect(Unit) { onFullyLoaded(true) }
 
@@ -244,35 +256,137 @@ private fun UnifiedImageContent(
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
         )
-        when {
-            cachedPath != null -> {
-                val fullPainter = rememberAsyncImagePainter(
-                    model = cachedPath!!,
-                    contentScale = ContentScale.FillWidth
+        AnimatedContent(
+            targetState = isUploading,
+            modifier = Modifier.matchParentSize(),
+            transitionSpec = {
+                (fadeIn(animationSpec = tween(220)) + scaleIn(initialScale = 0.98f, animationSpec = tween(220)))
+                    .togetherWith(
+                        fadeOut(animationSpec = tween(450, easing = FastOutSlowInEasing)) +
+                            scaleOut(targetScale = 1.02f, animationSpec = tween(450, easing = FastOutSlowInEasing))
+                    )
+            },
+            label = "upload_overlay"
+        ) { uploading ->
+            if (uploading) {
+                UploadingImageOverlay(
+                    model = localUri,
+                    uploadProgress = uploadProgress,
+                    modifier = Modifier.matchParentSize()
                 )
-                val fullState by fullPainter.state.collectAsState()
-                when (fullState) {
-                    is coil3.compose.AsyncImagePainter.State.Success -> {
-                        LaunchedEffect(Unit) { onFullyLoaded(true) }
-                        val alpha = remember { Animatable(0f) }
-                        LaunchedEffect(Unit) {
-                            alpha.animateTo(1f, animationSpec = tween(300))
-                        }
-                        Image(
-                            painter = fullPainter,
-                            contentDescription = file.name,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .alpha(alpha.value),
-                            contentScale = ContentScale.FillWidth
-                        )
+            } else {
+                Box(modifier = Modifier.matchParentSize())
+            }
+        }
+        if (cachedPath != null && file != null) {
+            val fullPainter = rememberAsyncImagePainter(
+                model = cachedPath!!,
+                contentScale = ContentScale.FillWidth
+            )
+            val fullState by fullPainter.state.collectAsState()
+            when (fullState) {
+                is coil3.compose.AsyncImagePainter.State.Success -> {
+                    LaunchedEffect(Unit) { onFullyLoaded(true) }
+                    val alpha = remember { Animatable(0f) }
+                    LaunchedEffect(Unit) {
+                        alpha.animateTo(1f, animationSpec = tween(300))
                     }
-                    else -> {
-                        LaunchedEffect(Unit) { onFullyLoaded(false) }
-                    }
+                    Image(
+                        painter = fullPainter,
+                        contentDescription = file.name,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .alpha(alpha.value),
+                        contentScale = ContentScale.FillWidth
+                    )
+                }
+                else -> {
+                    LaunchedEffect(Unit) { onFullyLoaded(false) }
                 }
             }
-            else -> LaunchedEffect(Unit) { onFullyLoaded(false) }
+        }
+    }
+}
+
+@OptIn(ExperimentalHazeMaterialsApi::class)
+@Composable
+private fun UploadingImageOverlay(
+    model: String,
+    uploadProgress: Int?,
+    modifier: Modifier = Modifier
+) {
+    Box(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clip(RoundedCornerShape(IMAGE_RADIUS))
+                .hazeEffect(style = HazeMaterials.thin())
+        ) {
+            AsyncImage(
+                model = model,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        }
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            ExpressiveUploadIndicator(
+                uploadProgress = uploadProgress,
+                modifier = Modifier.size(56.dp)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun ExpressiveUploadIndicator(
+    uploadProgress: Int?,
+    modifier: Modifier = Modifier
+) {
+    val clampedProgress = uploadProgress?.coerceIn(0, 100)
+    val animatedProgress by animateFloatAsState(
+        targetValue = (clampedProgress ?: 0) / 100f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessVeryLow,
+            visibilityThreshold = 1 / 1000f
+        ),
+        label = "uploadProgress"
+    )
+
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.82f))
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (clampedProgress != null) {
+                LoadingIndicator(
+                    progress = { animatedProgress },
+                    modifier = modifier,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "$clampedProgress%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            } else {
+                LoadingIndicator(
+                    modifier = modifier,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }
@@ -296,45 +410,32 @@ private fun PendingImageContent(
                     .matchParentSize()
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             )
-            if (isUploading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(IMAGE_RADIUS))
-                        .hazeEffect(style = HazeMaterials.thin())
-                ) {
-                    AsyncImage(
-                        model = uri,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                }
-            } else {
-                AsyncImage(
-                    model = uri,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            }
-            AnimatedVisibility(
-                visible = isUploading,
-                enter = fadeIn(animationSpec = tween(150)),
-                exit = fadeOut(animationSpec = tween(300))
-            ) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (uploadProgress != null) {
-                        DeterminateCircularProgress(
-                            progress = uploadProgress,
-                            modifier = Modifier.size(32.dp)
+            AsyncImage(
+                model = uri,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            AnimatedContent(
+                targetState = isUploading,
+                modifier = Modifier.matchParentSize(),
+                transitionSpec = {
+                    (fadeIn(animationSpec = tween(220)) + scaleIn(initialScale = 0.98f, animationSpec = tween(220)))
+                        .togetherWith(
+                            fadeOut(animationSpec = tween(450, easing = FastOutSlowInEasing)) +
+                                scaleOut(targetScale = 1.02f, animationSpec = tween(450, easing = FastOutSlowInEasing))
                         )
-                    } else {
-                        IndefiniteCircularProgress(modifier = Modifier.size(32.dp))
-                    }
+                },
+                label = "upload_state"
+            ) { uploading ->
+                if (uploading) {
+                    UploadingImageOverlay(
+                        model = uri,
+                        uploadProgress = uploadProgress,
+                        modifier = Modifier.matchParentSize()
+                    )
+                } else {
+                    Box(modifier = Modifier.matchParentSize())
                 }
             }
         }

@@ -479,7 +479,9 @@ fun ChatScreen(
                                         val plaintext = text.ifBlank { "" }
                                         attachments.forEach { att ->
                                             val jobId = "dm_${Clock.System.now().toEpochMilliseconds()}_${att.id}"
-                                            val tempId = -jobId.hashCode().let { if (it == 0) -1 else it }
+                                            val hc = jobId.hashCode()
+                                            val absHc = if (hc == Int.MIN_VALUE) Int.MAX_VALUE else kotlin.math.abs(hc)
+                                            val tempId = -(absHc.let { if (it == 0) 1 else it })
                                             val isImage = att.isImage
                                             val optimisticMessage = Message(
                                                 id = tempId,
@@ -492,7 +494,7 @@ fun ChatScreen(
                                                 profile_picture = null,
                                                 verified = null,
                                                 reply_to = replyTo,
-                                                client_message_id = null,
+                                                client_message_id = jobId,
                                                 reactions = null,
                                                 files = null,
                                                 pendingFileUri = att.uri,
