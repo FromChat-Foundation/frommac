@@ -140,7 +140,9 @@ fun AttachmentPreview(
             )
         }
         isImageWithThumb || isPendingImage -> {
-            var isFullyLoaded by remember { mutableStateOf(false) }
+            var isFullyLoaded by remember(messageId, fileIndex, file?.path, pendingFileUri) {
+                mutableStateOf(false)
+            }
             Box(
                 modifier = modifier
                     .then(
@@ -158,7 +160,6 @@ fun AttachmentPreview(
                             Modifier.size(IMAGE_SIZE)
                         }
                     )
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                     .clip(RoundedCornerShape(IMAGE_RADIUS))
                     .then(
                         if (onImageBounds != null && (isImageWithThumb || !isPendingImage)) {
@@ -180,7 +181,11 @@ fun AttachmentPreview(
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                if (!isExpanded) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { alpha = if (isExpanded) 0f else 1f }
+                ) {
                     when {
                         isPendingImage -> UnifiedImageContent(
                             localUri = pendingFileUri,
@@ -191,7 +196,7 @@ fun AttachmentPreview(
                             currentUserId = currentUserId,
                             isUploading = isUploading,
                             uploadProgress = uploadProgress,
-                            onFullyLoaded = { isFullyLoaded = it }
+                            onFullyLoaded = { if (it) isFullyLoaded = true }
                         )
                         else -> DecryptedImageContent(
                             messageId = messageId ?: -1,
@@ -201,11 +206,9 @@ fun AttachmentPreview(
                             currentUserId = currentUserId,
                             thumbnailBase64 = fileThumbnail!!,
                             aspectRatio = fileAspectRatio,
-                            onFullyLoaded = { isFullyLoaded = it }
+                            onFullyLoaded = { if (it) isFullyLoaded = true }
                         )
                     }
-                } else {
-                    Box(modifier = Modifier.fillMaxSize())
                 }
             }
         }
@@ -242,16 +245,25 @@ private fun UnifiedImageContent(
             null
         }
     }
-    LaunchedEffect(Unit) { onFullyLoaded(true) }
+
+    val localPainter = rememberAsyncImagePainter(
+        model = localUri,
+        contentScale = ContentScale.Crop
+    )
+    val localState by localPainter.state.collectAsState()
+    LaunchedEffect(localState) {
+        if (localState is coil3.compose.AsyncImagePainter.State.Success) {
+            onFullyLoaded(true)
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .clip(RoundedCornerShape(IMAGE_RADIUS))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
     ) {
-        AsyncImage(
-            model = localUri,
+        Image(
+            painter = localPainter,
             contentDescription = null,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
@@ -300,9 +312,7 @@ private fun UnifiedImageContent(
                         contentScale = ContentScale.FillWidth
                     )
                 }
-                else -> {
-                    LaunchedEffect(Unit) { onFullyLoaded(false) }
-                }
+                else -> Unit
             }
         }
     }
@@ -406,11 +416,6 @@ private fun PendingImageContent(
                 .fillMaxSize()
                 .clip(RoundedCornerShape(IMAGE_RADIUS))
         ) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            )
             AsyncImage(
                 model = uri,
                 contentDescription = null,
@@ -516,15 +521,11 @@ private fun DecryptedImageContent(
     LaunchedEffect(messageId, fileIndex, file.path, envelope) {
         cachedPath = DecryptedImageCache.getOrDecrypt(messageId, fileIndex, file, envelope, currentUserId)
     }
-    LaunchedEffect(cachedPath) {
-        onFullyLoaded(cachedPath != null)
-    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .clip(RoundedCornerShape(IMAGE_RADIUS))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
         when {
@@ -536,6 +537,7 @@ private fun DecryptedImageContent(
                 val fullState by fullPainter.state.collectAsState()
                 when (fullState) {
                     is coil3.compose.AsyncImagePainter.State.Success -> {
+                        LaunchedEffect(Unit) { onFullyLoaded(true) }
                         Image(
                             painter = fullPainter,
                             contentDescription = file.name,
@@ -585,6 +587,7 @@ private fun DecryptedImageContent(
                         }
                     }
                     is coil3.compose.AsyncImagePainter.State.Success -> {
+                        LaunchedEffect(Unit) { onFullyLoaded(true) }
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -606,6 +609,7 @@ private fun DecryptedImageContent(
                             val fullState by fullPainter.state.collectAsState()
                             when (fullState) {
                                 is coil3.compose.AsyncImagePainter.State.Success -> {
+                                    LaunchedEffect(Unit) { onFullyLoaded(true) }
                                     val alpha = remember { Animatable(0f) }
                                     LaunchedEffect(Unit) {
                                         alpha.animateTo(1f, animationSpec = tween(300))
