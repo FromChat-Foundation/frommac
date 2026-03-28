@@ -7,6 +7,7 @@ import dev.whyoleg.cryptography.CryptographyProvider
 import dev.whyoleg.cryptography.algorithms.AES
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import ru.fromchat.crypto.DmCiphertextCorruptedException
 
 private const val AES_KEY_SIZE = 32
 private const val GCM_IV_SIZE = 12
@@ -25,11 +26,15 @@ actual object DmCrypto {
         val wrapped = Base64.decode(wrappedMekB64)
         require(wrapped.size >= GCM_IV_SIZE + GCM_TAG_SIZE) { "Wrapped MEK too short" }
 
-        aesGcmDecrypt(
-            wrappingKey,
-            wrapped.sliceArray(0 until GCM_IV_SIZE),
-            wrapped.sliceArray(GCM_IV_SIZE until wrapped.size)
-        )
+        try {
+            aesGcmDecrypt(
+                wrappingKey,
+                wrapped.sliceArray(0 until GCM_IV_SIZE),
+                wrapped.sliceArray(GCM_IV_SIZE until wrapped.size)
+            )
+        } catch (e: Throwable) {
+            throw DmCiphertextCorruptedException(cause = e)
+        }
     }
 
     actual suspend fun decryptEnvelope(
@@ -37,21 +42,24 @@ actual object DmCrypto {
         ciphertextB64: String,
         mek: ByteArray
     ) = withContext(Dispatchers.Default) {
-        aesGcmDecrypt(
-            mek.require("MEK must be 32 bytes") {
-                it.size == AES_KEY_SIZE
-            },
-            Base64
-                .decode(ivB64)
-                .require("IV must be 12 bytes") {
-                    it.size == GCM_IV_SIZE
-                },
-            Base64
-                .decode(ciphertextB64)
-                .require("Ciphertext too short") {
-                    it.size >= GCM_TAG_SIZE
-                }
-        )
+        val key = mek.require("MEK must be 32 bytes") {
+            it.size == AES_KEY_SIZE
+        }
+        val iv = Base64
+            .decode(ivB64)
+            .require("IV must be 12 bytes") {
+                it.size == GCM_IV_SIZE
+            }
+        val ciphertext = Base64
+            .decode(ciphertextB64)
+            .require("Ciphertext too short") {
+                it.size >= GCM_TAG_SIZE
+            }
+        try {
+            aesGcmDecrypt(key, iv, ciphertext)
+        } catch (e: Throwable) {
+            throw DmCiphertextCorruptedException(cause = e)
+        }
     }
 
     private suspend fun aesGcmDecrypt(key: ByteArray, iv: ByteArray, ciphertext: ByteArray): ByteArray {

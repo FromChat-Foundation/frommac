@@ -17,6 +17,7 @@ import com.pr0gramm3r101.utils.settings.settings
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
+import ru.fromchat.crypto.transport.TransportCiphertext
 import ru.fromchat.crypto.transport.TransportCrypto
 
 private const val INLINE_UPLOAD_THRESHOLD_BYTES = 512 * 1024
@@ -100,12 +101,27 @@ class DmAttachmentUploadWorker(
 
         return runCatching {
             emitProgress(jobId, 0)
-            val encryptedBlob = encryptFileBlob(fileUri)
+            val transportKey = ApiClient.getTransportPublicKey()
+            val (msgCipher, ephemeralSecret) = TransportCrypto.encryptWithTransportKeyWithEphemeralSecret(
+                plaintext = plaintext,
+                transportPublicKeyB64 = transportKey.publicKeyB64
+            )
+            try {
+                val bytes = applicationContext.contentResolver.openInputStream(Uri.parse(fileUri))?.use { it.readBytes() }
+                    ?: error("Failed to read file from URI")
+                val encryptedBlob = TransportCrypto.encryptFileForTransport(
+                    fileBytes = bytes,
+                    transportPublicKeyB64 = transportKey.publicKeyB64,
+                    ephemeralSecretKey = ephemeralSecret
+                )
 
-            if (encryptedBlob.size <= INLINE_UPLOAD_THRESHOLD_BYTES) {
-                sendInline(jobId, recipientId, plaintext, filename, encryptedBlob)
-            } else {
-                sendResumable(jobId, recipientId, plaintext, filename, encryptedBlob)
+                if (encryptedBlob.size <= INLINE_UPLOAD_THRESHOLD_BYTES) {
+                    sendInline(jobId, recipientId, plaintext, filename, encryptedBlob, msgCipher)
+                } else {
+                    sendResumable(jobId, recipientId, plaintext, filename, encryptedBlob, msgCipher)
+                }
+            } finally {
+                ephemeralSecret.fill(0)
             }
 
             clearResumableState(jobId)
@@ -122,22 +138,13 @@ class DmAttachmentUploadWorker(
         }
     }
 
-    private suspend fun encryptFileBlob(fileUri: String): ByteArray {
-        val bytes = applicationContext.contentResolver.openInputStream(Uri.parse(fileUri))?.use { it.readBytes() }
-            ?: error("Failed to read file from URI")
-        val transportKey = ApiClient.getTransportPublicKey()
-        return TransportCrypto.encryptFileForTransport(
-            fileBytes = bytes,
-            transportPublicKeyB64 = transportKey.publicKeyB64
-        )
-    }
-
     private suspend fun sendInline(
         jobId: String,
         recipientId: Int,
         plaintext: String,
         filename: String,
-        encryptedBlob: ByteArray
+        encryptedBlob: ByteArray,
+        msgCipher: TransportCiphertext
     ) {
         val file = SendDmFile(
             encryptedFileDataB64 = Base64.encode(encryptedBlob),
@@ -148,7 +155,8 @@ class DmAttachmentUploadWorker(
             recipientId = recipientId,
             plaintext = plaintext,
             clientMessageId = jobId,
-            transportFiles = listOf(file)
+            transportFiles = listOf(file),
+            preparedTransport = msgCipher
         )
     }
 
@@ -157,7 +165,8 @@ class DmAttachmentUploadWorker(
         recipientId: Int,
         plaintext: String,
         filename: String,
-        encryptedBlob: ByteArray
+        encryptedBlob: ByteArray,
+        msgCipher: TransportCiphertext
     ) {
         val uploadId = settings.getString(uploadIdKey(jobId), "").ifBlank {
             val init = ApiClient.initDmUpload(
@@ -188,7 +197,8 @@ class DmAttachmentUploadWorker(
             recipientId = recipientId,
             plaintext = plaintext,
             clientMessageId = jobId,
-            uploadedFileIds = listOf(completed.fileId)
+            uploadedFileIds = listOf(completed.fileId),
+            preparedTransport = msgCipher
         )
     }
 

@@ -3,7 +3,9 @@ package ru.fromchat.crypto.dm
 import com.pr0gramm3r101.utils.crypto.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import ru.fromchat.crypto.DmCiphertextCorruptedException
 import ru.fromchat.crypto.backup.BackupCryptoPlatform
+import java.security.GeneralSecurityException
 
 actual object DmCrypto {
     private const val AES_KEY_SIZE = 32
@@ -22,7 +24,11 @@ actual object DmCrypto {
         val iv = wrapped.sliceArray(0 until GCM_IV_SIZE)
         val ciphertext = wrapped.sliceArray(GCM_IV_SIZE until wrapped.size)
 
-        BackupCryptoPlatform.aesGcmDecrypt(wrappingKey, iv, ciphertext)
+        try {
+            BackupCryptoPlatform.aesGcmDecrypt(wrappingKey, iv, ciphertext)
+        } catch (e: GeneralSecurityException) {
+            throw DmCiphertextCorruptedException(cause = e)
+        }
     }
 
     actual suspend fun decryptEnvelope(
@@ -38,7 +44,11 @@ actual object DmCrypto {
         require(iv.size == GCM_IV_SIZE) { "IV must be 12 bytes" }
         require(ciphertext.size >= GCM_TAG_SIZE) { "Ciphertext too short" }
 
-        BackupCryptoPlatform.aesGcmDecrypt(mek, iv, ciphertext)
+        try {
+            BackupCryptoPlatform.aesGcmDecrypt(mek, iv, ciphertext)
+        } catch (e: GeneralSecurityException) {
+            throw DmCiphertextCorruptedException(cause = e)
+        }
     }
 }
 

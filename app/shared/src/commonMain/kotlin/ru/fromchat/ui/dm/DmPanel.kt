@@ -18,6 +18,8 @@ import ru.fromchat.api.Message
 import ru.fromchat.api.ProfileCache
 import ru.fromchat.api.WebSocketMessage
 import ru.fromchat.core.Logger
+import ru.fromchat.crypto.CorruptedDmMessagePlaceholder
+import ru.fromchat.crypto.DmCiphertextCorruptedException
 import ru.fromchat.crypto.decryptEnvelope
 import ru.fromchat.ui.chat.AvatarInfo
 import ru.fromchat.ui.chat.ChatPanel
@@ -39,6 +41,21 @@ class DmPanel(
     private var otherDisplayName: String = "User $otherUserId"
     private var otherProfilePicture: String? = null
     private val dmEnvelopeMutex = Mutex()
+
+    private data class DmDecryptOutcome(val plaintext: String, val isCorrupted: Boolean)
+
+    /**
+     * Decrypt for display; only [DmCiphertextCorruptedException] yields the placeholder and [DmDecryptOutcome.isCorrupted].
+     * Other errors (e.g. missing identity keys) propagate.
+     */
+    private suspend fun decryptDmEnvelopeForUi(envelope: DmEnvelope): DmDecryptOutcome {
+        return try {
+            DmDecryptOutcome(decryptEnvelope(envelope, currentUserId), false)
+        } catch (e: DmCiphertextCorruptedException) {
+            Logger.e("DmPanel", "DM ciphertext corrupted (id=${envelope.id})", e)
+            DmDecryptOutcome(CorruptedDmMessagePlaceholder, true)
+        }
+    }
 
     init {
         updateState { it.copy(title = "Direct message", profileUserId = otherUserId) }
@@ -86,10 +103,9 @@ class DmPanel(
             clearMessages()
             val decryptedForLog = mutableListOf<Pair<Int, String>>()
             val messages = response.messages.map { envelope ->
-                decryptEnvelope(envelope, currentUserId).let { plaintext ->
-                    decryptedForLog.add(envelope.id to plaintext)
-                    createMessage(envelope, plaintext)
-                }
+                val outcome = decryptDmEnvelopeForUi(envelope)
+                decryptedForLog.add(envelope.id to outcome.plaintext)
+                createMessage(envelope, outcome.plaintext, outcome.isCorrupted)
             }
             decryptedForLog.takeLast(5).forEachIndexed { i, (id, json) ->
                 Logger.d("DmPanel", "Decrypted message #${i + 1} (id=$id): $json")
@@ -162,27 +178,25 @@ class DmPanel(
         scope.launch(Dispatchers.Default) {
             dmEnvelopeMutex.withLock {
                 val alreadyExists = _state.messages.any { it.id == envelope.id }
-                val plaintext = runCatching { decryptEnvelope(envelope, currentUserId) }.getOrNull()
+                val outcome = decryptDmEnvelopeForUi(envelope)
 
                 if (alreadyExists) return@withLock
 
-                if (plaintext != null) {
-                    if (envelope.senderId == currentUserId) {
-                        mergeConfirmedOwnMessage(envelope, plaintext)
-                    } else {
-                        addMessage(createMessage(envelope, plaintext))
-                    }
-                    if (envelope.replyToId != null) {
-                        val replyTo = _state.messages.find { it.id == envelope.replyToId }
-                        updateMessage(envelope.id) { it.copy(reply_to = replyTo) }
-                    }
+                if (envelope.senderId == currentUserId) {
+                    mergeConfirmedOwnMessage(envelope, outcome.plaintext, outcome.isCorrupted)
+                } else {
+                    addMessage(createMessage(envelope, outcome.plaintext, outcome.isCorrupted))
+                }
+                if (envelope.replyToId != null) {
+                    val replyTo = _state.messages.find { it.id == envelope.replyToId }
+                    updateMessage(envelope.id) { it.copy(reply_to = replyTo) }
                 }
             }
         }
     }
 
-    private fun mergeConfirmedOwnMessage(envelope: DmEnvelope, plaintext: String) {
-        val confirmed = createMessage(envelope, plaintext)
+    private fun mergeConfirmedOwnMessage(envelope: DmEnvelope, plaintext: String, isContentCorrupted: Boolean) {
+        val confirmed = createMessage(envelope, plaintext, isContentCorrupted)
         val hasAttachments = !envelope.files.isNullOrEmpty()
 
         updateState { currentState ->
@@ -247,21 +261,18 @@ class DmPanel(
         if (envelope.senderId != otherUserId && envelope.recipientId != otherUserId) return
         scope.launch(Dispatchers.Default) {
             DecryptedImageCache.invalidateForMessage(envelope.id)
-            val plaintext = runCatching { decryptEnvelope(envelope, currentUserId) }.getOrNull()
-            if (plaintext != null) {
-                val dec = parseDecryptedContent(plaintext)
-                updateMessage(envelope.id) {
-                    it.copy(
-                        content = dec.text,
-                        is_edited = true,
-                        fileThumbnails = dec.thumbnails ?: it.fileThumbnails,
-                        fileAspectRatios = dec.aspectRatios ?: it.fileAspectRatios,
-                        fileSizes = dec.fileSizes ?: it.fileSizes,
-                        fileDimensions = dec.fileDimensions ?: it.fileDimensions
-                    )
-                }
-            } else {
-                updateMessage(envelope.id) { it.copy(is_edited = true) }
+            val outcome = decryptDmEnvelopeForUi(envelope)
+            val dec = parseDecryptedContent(outcome.plaintext)
+            updateMessage(envelope.id) {
+                it.copy(
+                    content = dec.text,
+                    is_edited = true,
+                    fileThumbnails = dec.thumbnails ?: it.fileThumbnails,
+                    fileAspectRatios = dec.aspectRatios ?: it.fileAspectRatios,
+                    fileSizes = dec.fileSizes ?: it.fileSizes,
+                    fileDimensions = dec.fileDimensions ?: it.fileDimensions,
+                    isContentCorrupted = outcome.isCorrupted
+                )
             }
         }
     }
@@ -301,7 +312,7 @@ class DmPanel(
         }
     }
 
-    private fun createMessage(envelope: DmEnvelope, plaintext: String): Message {
+    private fun createMessage(envelope: DmEnvelope, plaintext: String, isContentCorrupted: Boolean): Message {
         val dec = parseDecryptedContent(plaintext)
         val username = if (envelope.senderId == currentUserId) {
             "You"
@@ -326,7 +337,8 @@ class DmPanel(
             fileThumbnails = dec.thumbnails,
             fileAspectRatios = dec.aspectRatios,
             fileSizes = dec.fileSizes,
-            fileDimensions = dec.fileDimensions
+            fileDimensions = dec.fileDimensions,
+            isContentCorrupted = isContentCorrupted
         )
     }
 
@@ -335,7 +347,7 @@ class DmPanel(
             ApiClient.editDm(messageId = messageId, recipientId = otherUserId, plaintext = content)
         }.onSuccess {
             updateMessage(messageId) { msg ->
-                msg.copy(content = content, is_edited = true)
+                msg.copy(content = content, is_edited = true, isContentCorrupted = false)
             }
         }
     }

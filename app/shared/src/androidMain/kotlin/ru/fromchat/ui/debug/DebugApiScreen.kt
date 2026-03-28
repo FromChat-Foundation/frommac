@@ -243,20 +243,30 @@ actual fun DebugApiScreen() {
                         runCatching {
                             val fileBytes = "test file".encodeToByteArray()
                             val transportKey = ApiClient.getTransportPublicKey()
-                            val transportBlob = TransportCrypto.encryptFileForTransport(
-                                fileBytes = fileBytes,
+                            val (msgCipher, secret) = TransportCrypto.encryptWithTransportKeyWithEphemeralSecret(
+                                plaintext = "test file",
                                 transportPublicKeyB64 = transportKey.publicKeyB64
                             )
-                            val sendFile = SendDmFile(
-                                encryptedFileDataB64 = Base64.encode(transportBlob),
-                                filename = "test.txt",
-                                fileSize = fileBytes.size.toLong()
-                            )
-                            ApiClient.sendDm(
-                                recipientId = 2,
-                                plaintext = "test file",
-                                transportFiles = listOf(sendFile)
-                            )
+                            try {
+                                val transportBlob = TransportCrypto.encryptFileForTransport(
+                                    fileBytes = fileBytes,
+                                    transportPublicKeyB64 = transportKey.publicKeyB64,
+                                    ephemeralSecretKey = secret
+                                )
+                                val sendFile = SendDmFile(
+                                    encryptedFileDataB64 = Base64.encode(transportBlob),
+                                    filename = "test.txt",
+                                    fileSize = fileBytes.size.toLong()
+                                )
+                                ApiClient.sendDm(
+                                    recipientId = 2,
+                                    plaintext = "test file",
+                                    transportFiles = listOf(sendFile),
+                                    preparedTransport = msgCipher
+                                )
+                            } finally {
+                                secret.fill(0)
+                            }
                         }.onSuccess {
                             statusMessage = "Protocol test file sent to user 2"
                         }.onFailure {

@@ -35,6 +35,7 @@ import kotlin.concurrent.Volatile
 import kotlin.time.Duration.Companion.milliseconds
 import com.pr0gramm3r101.utils.crypto.Base64
 import ru.fromchat.crypto.IdentityKeyManager
+import ru.fromchat.crypto.transport.TransportCiphertext
 import ru.fromchat.crypto.transport.TransportCrypto
 
 /**
@@ -254,7 +255,8 @@ object ApiClient {
         clientMessageId: String? = null,
         replyToId: Int? = null,
         transportFiles: List<SendDmFile> = emptyList(),
-        uploadedFileIds: List<String> = emptyList()
+        uploadedFileIds: List<String> = emptyList(),
+        preparedTransport: TransportCiphertext? = null
     ) {
         val keys = IdentityKeyManager.getCurrentKeys()
             ?: IdentityKeyManager.restoreFromLocal()
@@ -262,12 +264,14 @@ object ApiClient {
 
         val recipientPublicKey = getUserPublicKey(recipientId).publicKey
             ?: error("Recipient public key not found")
-        val transportKey = getTransportPublicKey()
 
-        val transportCipher = TransportCrypto.encryptWithTransportKey(
-            plaintext = plaintext,
-            transportPublicKeyB64 = transportKey.publicKeyB64
-        )
+        val transportCipher = preparedTransport ?: run {
+            val transportKey = getTransportPublicKey()
+            TransportCrypto.encryptWithTransportKey(
+                plaintext = plaintext,
+                transportPublicKeyB64 = transportKey.publicKeyB64
+            )
+        }
 
         val senderPublicKeyB64 = Base64.encode(keys.publicKey)
 

@@ -276,19 +276,29 @@ fun ChatInput(
                 )
         ) {
             AnimatedPreviewBar(replyTo) { replyTo ->
+                val replySubtitle = if (replyTo.isContentCorrupted) {
+                    "Corrupted message"
+                } else {
+                    replyTo.content.take(50) + if (replyTo.content.length > 50) "..." else ""
+                }
                 PreviewBar(
                     icon = Icons.AutoMirrored.Filled.Reply,
                     title = "Replying to ${replyTo.username}",
-                    subtitle = replyTo.content.take(50) + if (replyTo.content.length > 50) "..." else "",
+                    subtitle = replySubtitle,
                     onClose = { onClearReply() }
                 )
             }
 
             AnimatedPreviewBar(editingMessage) { message ->
+                val subtitle = if (message.isContentCorrupted) {
+                    "Corrupted message"
+                } else {
+                    message.content.take(50) + if (message.content.length > 50) "..." else ""
+                }
                 PreviewBar(
                     icon = Icons.Filled.Edit,
                     title = "Editing message",
-                    subtitle = message.content.take(50) + if (message.content.length > 50) "..." else "",
+                    subtitle = subtitle,
                     onClose = { onClearEdit() }
                 )
             }

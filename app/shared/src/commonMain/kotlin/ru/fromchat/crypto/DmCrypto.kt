@@ -4,6 +4,9 @@ import com.pr0gramm3r101.utils.crypto.PasswordHash
 import ru.fromchat.api.DmEnvelope
 import ru.fromchat.crypto.dm.DmCrypto
 
+/** Shown in the UI when [DmCiphertextCorruptedException] is caught while decrypting a DM. */
+const val CorruptedDmMessagePlaceholder = "This message is corrupted and can't be displayed."
+
 /**
  * Unwrap a MEK (Message Encryption Key) using the appropriate wrapping key
  * Matches Web implementation: derive wrapping key from our public key using HKDF
@@ -33,16 +36,15 @@ suspend fun unwrapMek(wrappedMekB64: String, envelope: DmEnvelope, currentUserId
 }
 
 /**
- * Decrypt a DM envelope to plaintext
+ * Decrypt a DM envelope to plaintext.
+ * @throws DmCiphertextCorruptedException if unwrap or body decrypt fails authentication (see platform [DmCrypto])
+ * @throws IllegalArgumentException if the envelope has no wrapped MEK
+ * @throws IllegalStateException if identity keys are not available
  */
 suspend fun decryptEnvelope(envelope: DmEnvelope, currentUserId: Int?): String {
     val wrappedMekB64 = envelope.wrappedMekB64
         ?: throw IllegalArgumentException("No wrapped MEK available for decryption")
-    
-    // Unwrap the MEK
     val mek = unwrapMek(wrappedMekB64, envelope, currentUserId)
-    
-    // Decrypt the message using the unwrapped MEK
     val plaintext = DmCrypto.decryptEnvelope(envelope.ivB64, envelope.ciphertextB64, mek)
     return plaintext.decodeToString()
 }

@@ -26,16 +26,22 @@ expect object TransportCrypto {
     ): TransportCiphertext
 
     /**
+     * Same transport encryption as [encryptWithTransportKey], but also returns the ephemeral
+     * secret key so file blobs can be encrypted for the same [client_public_key_b64].
+     * Caller must zero [Pair.second] after use.
+     */
+    suspend fun encryptWithTransportKeyWithEphemeralSecret(
+        plaintext: String,
+        transportPublicKeyB64: String
+    ): Pair<TransportCiphertext, ByteArray>
+
+    /**
      * Encrypt raw file bytes for transport using the server's transport public key
-     * and the client's long-term identity private key.
-     *
-     * This mirrors the Web client's behaviour for `transport_files`:
-     * - Uses NaCl box with (server transport public key, identity private key)
-     * - Returns a blob formatted as `nonce || ciphertext`
+     * and the same ephemeral secret used for the message (nonce || ciphertext).
      */
     suspend fun encryptFileForTransport(
         fileBytes: ByteArray,
-        transportPublicKeyB64: String
+        transportPublicKeyB64: String,
+        ephemeralSecretKey: ByteArray
     ): ByteArray
 }
-

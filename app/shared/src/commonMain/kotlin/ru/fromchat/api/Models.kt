@@ -113,7 +113,9 @@ data class Message(
     /** File sizes in bytes (by index); from decrypted message JSON. */
     @kotlinx.serialization.Transient val fileSizes: List<Long>? = null,
     /** Image dimensions (width, height) for image files (by index); from decrypted message JSON. */
-    @kotlinx.serialization.Transient val fileDimensions: List<Pair<Int, Int>>? = null
+    @kotlinx.serialization.Transient val fileDimensions: List<Pair<Int, Int>>? = null,
+    /** True when DM plaintext could not be decrypted and [content] shows the corrupted placeholder. */
+    @kotlinx.serialization.Transient val isContentCorrupted: Boolean = false
 )
 
 @Serializable

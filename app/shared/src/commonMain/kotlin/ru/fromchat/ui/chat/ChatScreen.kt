@@ -633,7 +633,7 @@ fun ChatScreen(
                         },
                         onEdit = { message ->
                             editingMessage = message
-                            inputText = message.content
+                            inputText = if (message.isContentCorrupted) "" else message.content
                             replyTo = null
                         },
                         onDelete = { message ->

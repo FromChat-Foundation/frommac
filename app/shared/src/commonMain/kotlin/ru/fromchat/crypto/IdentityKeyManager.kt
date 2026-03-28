@@ -2,11 +2,12 @@ package ru.fromchat.crypto
 
 import com.pr0gramm3r101.utils.crypto.Base64
 import com.pr0gramm3r101.utils.settings.secureSettings
-import com.pr0gramm3r101.utils.settings.settings
 import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ru.fromchat.api.ApiClient
@@ -14,9 +15,9 @@ import ru.fromchat.api.PublicKeyResponse
 import ru.fromchat.core.Logger
 import ru.fromchat.core.config.Config
 import ru.fromchat.crypto.backup.BackupCrypto
+import ru.fromchat.crypto.backup.PrivateKeyBundle
 import ru.fromchat.crypto.backup.decodeBlob
 import ru.fromchat.crypto.backup.encodeBlob
-import ru.fromchat.crypto.backup.PrivateKeyBundle
 import kotlin.concurrent.Volatile
 
 /**
@@ -168,6 +169,7 @@ object IdentityKeyManager {
     private suspend fun uploadBackupBlob(blobJson: String, token: String) {
         val payload = BackupBlobRequest(blob = blobJson)
         ApiClient.http.post("${Config.apiBaseUrl}/crypto/backup") {
+            contentType(ContentType.Application.Json)
             setBody(payload)
         }
     }
@@ -185,6 +187,7 @@ object IdentityKeyManager {
     private suspend fun uploadPublicKey(publicKey: ByteArray, token: String) {
         val payload = UploadPublicKeyRequest(publicKey = Base64.encode(publicKey))
         ApiClient.http.post("${Config.apiBaseUrl}/crypto/public-key") {
+            contentType(ContentType.Application.Json)
             setBody(payload)
         }
     }
