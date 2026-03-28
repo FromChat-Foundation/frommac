@@ -36,6 +36,7 @@ import ru.fromchat.Res
 import ru.fromchat.api.ApiClient
 import ru.fromchat.api.RegisterRequest
 import ru.fromchat.api.apiRequest
+import ru.fromchat.crypto.IdentityKeyManager
 import ru.fromchat.back
 import ru.fromchat.confirm_password
 import ru.fromchat.display_name
@@ -165,8 +166,10 @@ fun RegisterScreen(
 
                             // Derive auth secret before sending (matches frontend implementation)
                             scope.launch {
-                                val derived = deriveAuthSecret(username.trim(), password)
-                                
+                                val u = username.trim()
+                                val display = displayName.trim()
+                                val derived = deriveAuthSecret(u, password)
+
                                 apiRequest(
                                     unexpectedError = errorUnexpected,
                                     onError = { message, _ ->
@@ -176,14 +179,27 @@ fun RegisterScreen(
                                         onRegistered()
                                     }
                                 ) {
-                                    ApiClient.register(
+                                    val response = ApiClient.registerRequest(
                                         RegisterRequest(
-                                            username.trim(),
-                                            displayName.trim(),
+                                            u,
+                                            display,
                                             derived,
                                             derived
                                         )
                                     )
+                                    ApiClient.bindSession(response)
+                                    try {
+                                        IdentityKeyManager.ensureKeysOnLogin(
+                                            username = u,
+                                            password = password,
+                                            token = response.token
+                                        )
+                                    } catch (e: Exception) {
+                                        ApiClient.clearMemorySession()
+                                        throw e
+                                    }
+                                    ApiClient.persistSessionToStorage(response)
+                                    response
                                 }
                             }
                         }

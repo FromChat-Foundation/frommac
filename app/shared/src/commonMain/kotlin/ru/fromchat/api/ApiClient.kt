@@ -121,39 +121,46 @@ object ApiClient {
     }
 
 
-    suspend fun login(request: LoginRequest) =
+    suspend fun loginRequest(request: LoginRequest): LoginResponse =
         http
             .post("${Config.apiBaseUrl}/login") {
                 contentType(ContentType.Application.Json)
                 setBody(request)
             }
-            .body<LoginResponse>()
-            .also {
-                token = it.token
-                user = it.user
-                secureSettings.putString("auth_token", it.token)
-                settings.putString("user_info", json.encodeToString(it.user))
-                settings.putInt("current_user_id", it.user.id)
-                // Upload any pending FCM token after successful login
-                MainScope().launch {
-                    runCatching {
-                        uploadPendingFcmTokenIfAvailable()
-                    }
-                }
-            }
+            .body()
 
-    suspend fun register(request: RegisterRequest) =
-        http.post("${Config.apiBaseUrl}/register") {
-            contentType(ContentType.Application.Json)
-            setBody(request)
-        }.also {
-            // Upload any pending FCM token after successful registration
-            MainScope().launch {
-                runCatching {
-                    uploadPendingFcmTokenIfAvailable()
-                }
+    suspend fun registerRequest(request: RegisterRequest): LoginResponse =
+        http
+            .post("${Config.apiBaseUrl}/register") {
+                contentType(ContentType.Application.Json)
+                setBody(request)
+            }
+            .body()
+
+    /**
+     * Sets in-memory auth only so follow-up calls (e.g. crypto upload) use Bearer token.
+     * Persist with [persistSessionToStorage] only after identity keys are fully synced.
+     */
+    fun bindSession(loginResponse: LoginResponse) {
+        token = loginResponse.token
+        user = loginResponse.user
+    }
+
+    fun clearMemorySession() {
+        token = null
+        user = null
+    }
+
+    suspend fun persistSessionToStorage(loginResponse: LoginResponse) {
+        secureSettings.putString("auth_token", loginResponse.token)
+        settings.putString("user_info", json.encodeToString(loginResponse.user))
+        settings.putInt("current_user_id", loginResponse.user.id)
+        MainScope().launch {
+            runCatching {
+                uploadPendingFcmTokenIfAvailable()
             }
         }
+    }
 
     suspend fun getMessages(limit: Int = 50, beforeId: Int? = null) =
         http

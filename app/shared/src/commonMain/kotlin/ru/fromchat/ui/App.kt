@@ -157,7 +157,11 @@ fun App(scrollToMessageId: Int? = null, startAtPublicChat: Boolean = false) {
 
                     composable("register") {
                         RegisterScreen(
-                            onRegistered = { navController.navigate("login") }
+                            onRegistered = {
+                                navController.navigate("chat") {
+                                    popUpTo("login") { inclusive = true }
+                                }
+                            }
                         )
                     }
 

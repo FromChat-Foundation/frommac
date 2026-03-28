@@ -181,13 +181,19 @@ fun LoginScreen(
                                         onLoginSuccess()
                                     }
                                 ) {
-                                    val response = ApiClient.login(LoginRequest(trimmedUsername, derived))
-                                    // Ensure identity keys and backup are initialized after successful login
-                                    IdentityKeyManager.ensureKeysOnLogin(
-                                        username = trimmedUsername,
-                                        password = trimmedPassword,
-                                        token = response.token
-                                    )
+                                    val response = ApiClient.loginRequest(LoginRequest(trimmedUsername, derived))
+                                    ApiClient.bindSession(response)
+                                    try {
+                                        IdentityKeyManager.ensureKeysOnLogin(
+                                            username = trimmedUsername,
+                                            password = trimmedPassword,
+                                            token = response.token
+                                        )
+                                    } catch (e: Exception) {
+                                        ApiClient.clearMemorySession()
+                                        throw e
+                                    }
+                                    ApiClient.persistSessionToStorage(response)
                                     response
                                 }
                             }
