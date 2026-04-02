@@ -383,5 +383,9 @@ abstract class ChatPanel(
 
     open val showUsernamesInMessages: Boolean
         get() = true
+
+    /** When true, tapping a sender username in a message opens their profile (e.g. public chat). */
+    open val supportsNavigateToSenderProfile: Boolean
+        get() = false
 }
 

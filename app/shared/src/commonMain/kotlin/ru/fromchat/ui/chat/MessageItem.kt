@@ -9,8 +9,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -74,6 +77,7 @@ fun MessageItem(
     isAuthor: Boolean,
     onLongPress: () -> Unit,
     onTapPosition: (Offset) -> Unit = {},
+    onUsernameClick: (() -> Unit)? = null,
     onImageClick: ((Message, Int) -> Unit)? = null,
     onImageBounds: ((String, Rect) -> Unit)? = null,
     modifier: Modifier = Modifier,
@@ -97,8 +101,10 @@ fun MessageItem(
         modifier = modifier
     ) {
         var isPressed by remember { mutableStateOf(false) }
-        var rowPositionInRoot by remember { mutableStateOf(Offset.Zero) }
+        var avatarPressed by remember(message.id) { mutableStateOf(false) }
+        var bubbleBodyPositionInRoot by remember { mutableStateOf(Offset.Zero) }
         val scaleTarget = if (isPressed && !isContextMenuForThisMessage && !isContextMenuOpen) 0.96f else 1f
+        val avatarScaleTarget = if (avatarPressed && !isContextMenuOpen) 0.96f else 1f
         val scale by animateFloatAsState(
             targetValue = scaleTarget,
             animationSpec = spring(
@@ -108,42 +114,51 @@ fun MessageItem(
             visibilityThreshold = 0.001f,
             label = "messageBubbleScale"
         )
+        val avatarScale by animateFloatAsState(
+            targetValue = avatarScaleTarget,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            ),
+            visibilityThreshold = 0.001f,
+            label = "messageAvatarScale"
+        )
 
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-                .onGloballyPositioned { coordinates ->
-                    rowPositionInRoot = coordinates.positionInRoot()
-                }
-                .then(
-                    if (isContextMenuOpen) Modifier
-                    else Modifier.pointerInput(Unit) {
-                        detectTapGestures(
-                            onPress = {
-                                isPressed = true
-                                try {
-                                    awaitRelease()
-                                } finally {
-                                    isPressed = false
-                                }
-                            },
-                            onLongPress = { offset ->
-                                onTapPosition(rowPositionInRoot + offset)
-                                onLongPress()
-                            }
-                        )
-                    }
-                ),
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             horizontalArrangement = if (isAuthor) Arrangement.End else Arrangement.Start,
             verticalAlignment = Alignment.Bottom
         ) {
             if (!isAuthor && showUsername) {
-                Avatar(
-                    profilePictureUrl = message.profile_picture,
-                    displayName = message.username,
-                    modifier = Modifier.size(32.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .graphicsLayer(
+                            scaleX = avatarScale,
+                            scaleY = avatarScale,
+                            transformOrigin = TransformOrigin.Center
+                        )
+                        .pointerInput(onUsernameClick, isContextMenuOpen) {
+                            detectTapGestures(
+                                onPress = {
+                                    if (!isContextMenuOpen) avatarPressed = true
+                                    try {
+                                        awaitRelease()
+                                    } finally {
+                                        if (!isContextMenuOpen) avatarPressed = false
+                                    }
+                                },
+                                onTap = { onUsernameClick?.invoke() }
+                            )
+                        }
+                ) {
+                    Avatar(
+                        profilePictureUrl = message.profile_picture,
+                        displayName = message.username,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
 
                 Spacer(modifier = Modifier.width(8.dp))
             }
@@ -166,26 +181,42 @@ fun MessageItem(
                         )
                         else -> false
                     }
-                    val firstContentIsImage = (!showUsername || isAuthor) &&
-                        message.reply_to == null &&
-                        (pendingIsImage || message.files?.firstOrNull()?.let { isImageFilename(it.name) } == true)
+                    val firstContentIsImage = (
+                        !showUsername || isAuthor
+                    ) && message.reply_to == null && (
+                        pendingIsImage || message.files?.firstOrNull()?.let { isImageFilename(it.name) } == true
+                    )
+
+                    val bubbleShape = RoundedCornerShape(
+                        topStart = 20.dp,
+                        topEnd = 20.dp,
+                        bottomStart = if (isAuthor) 20.dp else 8.dp,
+                        bottomEnd = if (isAuthor) 8.dp else 20.dp
+                    )
+
+                    val bubbleBodyGestures =
+                        if (isContextMenuOpen) Modifier
+                        else Modifier.pointerInput(Unit) {
+                            detectTapGestures(
+                                onPress = {
+                                    isPressed = true
+                                    try {
+                                        awaitRelease()
+                                    } finally {
+                                        isPressed = false
+                                    }
+                                },
+                                onLongPress = { offset ->
+                                    onTapPosition(bubbleBodyPositionInRoot + offset)
+                                    onLongPress()
+                                }
+                            )
+                        }
+
                     Box(
                         modifier = Modifier
-                            .graphicsLayer(
-                                scaleX = scale,
-                                scaleY = scale,
-                                transformOrigin = TransformOrigin.Center
-                            )
-                            // Max width: 70% of row, min width: content-driven
                             .widthIn(max = maxBubbleWidth)
-                            .clip(
-                                RoundedCornerShape(
-                                    topStart = 20.dp,
-                                    topEnd = 20.dp,
-                                    bottomStart = if (isAuthor) 20.dp else 8.dp,
-                                    bottomEnd = if (isAuthor) 8.dp else 20.dp
-                                )
-                            )
+                            .clip(bubbleShape)
                             .conditional(
                                 isAuthor,
                                 `if` = {
@@ -206,20 +237,64 @@ fun MessageItem(
                                     background(MaterialTheme.colorScheme.surfaceContainerHighest)
                                 }
                             )
+                            .graphicsLayer(
+                                scaleX = scale,
+                                scaleY = scale,
+                                transformOrigin = TransformOrigin.Center
+                            )
                             .padding(top = if (firstContentIsImage) 0.dp else 6.dp)
                     ) {
-                        Column {
-                            // Username inside bubble (for received messages)
+                        val bubbleColumnModifier =
+                            if (showUsername && !isAuthor) Modifier.width(IntrinsicSize.Max)
+                            else Modifier
+                        Column(modifier = bubbleColumnModifier) {
                             if (showUsername && !isAuthor) {
-                                Text(
-                                    text = message.username,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 4.dp)
-                                )
+                                val usernameShape = RoundedCornerShape(6.dp)
+                                val usernameOutset = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 4.dp)
+                                val usernameInset = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                if (onUsernameClick != null) {
+                                    val usernameInteraction = remember(message.id) { MutableInteractionSource() }
+                                    Box(
+                                        modifier = usernameOutset
+                                            .clip(usernameShape)
+                                            .clickable(
+                                                interactionSource = usernameInteraction,
+                                                indication = LocalIndication.current,
+                                                onClick = onUsernameClick
+                                            )
+                                    ) {
+                                        Text(
+                                            text = message.username,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = usernameInset
+                                        )
+                                    }
+                                } else {
+                                    Box(modifier = usernameOutset) {
+                                        Text(
+                                            text = message.username,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = usernameInset
+                                        )
+                                    }
+                                }
                             }
 
+                            val gestureWidthModifier =
+                                if (showUsername && !isAuthor) Modifier.fillMaxWidth()
+                                else Modifier
+                            Box(
+                                modifier = gestureWidthModifier
+                                    .onGloballyPositioned { coordinates ->
+                                        bubbleBodyPositionInRoot = coordinates.positionInRoot()
+                                    }
+                                    .then(bubbleBodyGestures)
+                            ) {
+                                Column {
                             // Reply preview
                             message.reply_to?.let { replyTo ->
                                 Box(
@@ -435,6 +510,8 @@ fun MessageItem(
                                             MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                                         }
                                     )
+                                }
+                            }
                                 }
                             }
                         }

@@ -24,6 +24,9 @@ class PublicChatPanel(
     private val typingHandler = PublicChatTypingHandler(scope)
     private var messagesLoaded = false
 
+    override val supportsNavigateToSenderProfile: Boolean
+        get() = true
+
     init {
         updateState { it.copy(title = chatName) }
         // Observe typing users from the handler and update panel state

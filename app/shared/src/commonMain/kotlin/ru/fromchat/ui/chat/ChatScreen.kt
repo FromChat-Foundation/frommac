@@ -75,6 +75,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.compose.resources.stringResource
 import ru.fromchat.Res
 import ru.fromchat.api.ApiClient
+import ru.fromchat.api.ProfileCache
 import ru.fromchat.api.AttachmentUploadJob
 import ru.fromchat.api.AttachmentUploadQueue
 import ru.fromchat.api.ConnectionStateStore
@@ -656,6 +657,18 @@ fun ChatScreen(
                                     onTapPosition = { offset ->
                                         tapPositionInRoot = IntOffset(offset.x.toInt(), offset.y.toInt())
                                     },
+                                    onUsernameClick =
+                                        if (panel.supportsNavigateToSenderProfile &&
+                                            message.user_id != currentUserId &&
+                                            message.user_id > 0
+                                        ) {
+                                            {
+                                                ProfileCache.mergePreviewFromPublicMessage(message)
+                                                navController.navigate("profile/${message.user_id}")
+                                            }
+                                        } else {
+                                            null
+                                        },
                                     onImageClick = { msg, idx -> expandedImage = msg to idx },
                                     onImageBounds = { key, rect ->
                                         imageThumbBounds[key] = rect
