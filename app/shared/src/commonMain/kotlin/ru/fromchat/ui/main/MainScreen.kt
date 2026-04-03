@@ -96,7 +96,7 @@ fun MainScreen(onLogout: () -> Unit = {}) {
         ) { page ->
             when (page) {
                 PAGE_CHATS -> ChatsTab()
-                PAGE_CONTACTS -> Text(stringResource(Res.string.coming_soon))
+                PAGE_CONTACTS -> ContactsTab()
                 PAGE_SETTINGS -> SettingsTab(onLogout = onLogout)
                 PAGE_PROFILE -> {
                     val currentUserId = ApiClient.user?.id

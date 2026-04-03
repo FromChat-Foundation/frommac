@@ -30,6 +30,8 @@
     <string name="profile">Профиль</string>
     <string name="dms">Личные чаты</string>
     <string name="coming_soon">Скоро…</string>
+    <string name="contacts_empty_title">Скоро</string>
+    <string name="contacts_empty_body">Список контактов появится здесь, когда функция будет готова.</string>
     <string name="public_chat">Общий чат</string>
     <string name="chat_last_mesaage">Вы: последнее сообщение</string>
     <string name="message_placeholder">Напишите сообщение…</string>
