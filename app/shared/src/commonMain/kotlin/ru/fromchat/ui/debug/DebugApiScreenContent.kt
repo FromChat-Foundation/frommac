@@ -37,6 +37,7 @@ import ru.fromchat.crypto.IdentityKeyManager
 import ru.fromchat.crypto.decryptEnvelope
 import ru.fromchat.crypto.transport.TransportCrypto
 import ru.fromchat.ui.LocalNavController
+import ru.fromchat.ui.dm.DmNav
 
 /**
  * English-only copy: the Debug API screen is not for end users; strings are not in compose
@@ -170,7 +171,7 @@ fun DebugApiScreenContent() {
                 modifier = Modifier.fillMaxWidth()
             )
             Button(
-                onClick = { navController.navigate("dm/2") },
+                onClick = { navController.navigate(DmNav.chatRoute(2)) },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(text = DebugScreenText.OpenAction)

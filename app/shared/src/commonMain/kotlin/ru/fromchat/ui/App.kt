@@ -4,6 +4,8 @@ import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection.
 import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection.Companion.Start
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import coil3.ImageLoader
 import coil3.compose.setSingletonImageLoaderFactory
 import coil3.svg.SvgDecoder
@@ -38,7 +40,9 @@ import ru.fromchat.ui.auth.LoginScreen
 import ru.fromchat.ui.auth.RegisterScreen
 import ru.fromchat.ui.chat.PublicChatScreen
 import ru.fromchat.ui.debug.DebugApiScreen
-import ru.fromchat.ui.dm.DmContainerScreen
+import ru.fromchat.ui.dm.DmChatRoute
+import ru.fromchat.ui.dm.DmNav
+import ru.fromchat.ui.dm.DmProfileRoute
 import ru.fromchat.ui.main.MainScreen
 import ru.fromchat.ui.profile.ProfileScreen
 import ru.fromchat.ui.setup.ServerConfigScreen
@@ -237,7 +241,7 @@ fun App(scrollToMessageId: Int? = null, startAtPublicChat: Boolean = false) {
                         ProfileScreen(
                             userId = userId,
                             onBack = { navController.navigateUp() },
-                            onChat = { navController.navigate("dm/$it") },
+                            onChat = { navController.navigate(DmNav.chatRoute(it)) },
                             sharedTransitionScope = this@SharedTransitionLayout,
                             animatedVisibilityScope = this@composable,
                             useSharedElementFromNavigation = useSharedElement,
@@ -245,11 +249,61 @@ fun App(scrollToMessageId: Int? = null, startAtPublicChat: Boolean = false) {
                         )
                     }
 
-                    composable("dm/{otherUserId}") { backStackEntry ->
-                        val otherUserId = backStackEntry.savedStateHandle.get<String>("otherUserId")?.toIntOrNull() ?: 0
-                        DmContainerScreen(
+                    val dmChatProfileFade = tween<Float>(durationMillis = 280)
+
+                    composable(
+                        route = DmNav.CHAT_ROUTE,
+                        arguments = listOf(navArgument("otherUserId") { type = NavType.StringType }),
+                        enterTransition = {
+                            when (initialState.destination.route) {
+                                DmNav.PROFILE_ROUTE -> fadeIn(animationSpec = dmChatProfileFade)
+                                else -> slideIntoContainer(Start, animationSpec = animationSpec)
+                            }
+                        },
+                        exitTransition = {
+                            when (targetState.destination.route) {
+                                DmNav.PROFILE_ROUTE -> fadeOut(animationSpec = dmChatProfileFade)
+                                else -> slideOutOfContainer(Start, animationSpec = animationSpec)
+                            }
+                        },
+                        popEnterTransition = {
+                            when (initialState.destination.route) {
+                                DmNav.PROFILE_ROUTE -> fadeIn(animationSpec = dmChatProfileFade)
+                                else -> slideIntoContainer(End, animationSpec = animationSpec)
+                            }
+                        },
+                        popExitTransition = {
+                            when (targetState.destination.route) {
+                                DmNav.PROFILE_ROUTE -> fadeOut(animationSpec = dmChatProfileFade)
+                                else -> slideOutOfContainer(End, animationSpec = animationSpec)
+                            }
+                        },
+                    ) { entry ->
+                        val otherUserId = entry.savedStateHandle.get<String>("otherUserId")?.toIntOrNull() ?: 0
+                        if (otherUserId <= 0) return@composable
+                        DmChatRoute(
                             otherUserId = otherUserId,
-                            onBack = { navController.navigateUp() }
+                            navController = navController,
+                            sharedTransitionScope = this@SharedTransitionLayout,
+                            animatedVisibilityScope = this,
+                        )
+                    }
+
+                    composable(
+                        route = DmNav.PROFILE_ROUTE,
+                        arguments = listOf(navArgument("otherUserId") { type = NavType.StringType }),
+                        enterTransition = { fadeIn(animationSpec = dmChatProfileFade) },
+                        exitTransition = { fadeOut(animationSpec = dmChatProfileFade) },
+                        popEnterTransition = { fadeIn(animationSpec = dmChatProfileFade) },
+                        popExitTransition = { fadeOut(animationSpec = dmChatProfileFade) },
+                    ) { entry ->
+                        val otherUserId = entry.savedStateHandle.get<String>("otherUserId")?.toIntOrNull() ?: 0
+                        if (otherUserId <= 0) return@composable
+                        DmProfileRoute(
+                            otherUserId = otherUserId,
+                            navController = navController,
+                            sharedTransitionScope = this@SharedTransitionLayout,
+                            animatedVisibilityScope = this,
                         )
                     }
 

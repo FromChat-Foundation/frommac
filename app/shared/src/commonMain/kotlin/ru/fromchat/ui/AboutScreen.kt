@@ -47,6 +47,10 @@ import ru.fromchat.app_name
 import ru.fromchat.back
 import ru.fromchat.ui.branding.FromChatBrandTitle
 
+/**
+ * About is a root [androidx.navigation.NavHost] destination; system and predictive back (see
+ * manifest `enableOnBackInvokedCallback`) pop via the same stack as [LocalNavController.navigateUp].
+ */
 private const val URL_TELEGRAM = "https://t.me/fromchat_ch"
 private const val URL_MAX = "https://maxgate.io/fromchat_ch"
 private const val URL_WEBSITE = "https://fromchat.ru"

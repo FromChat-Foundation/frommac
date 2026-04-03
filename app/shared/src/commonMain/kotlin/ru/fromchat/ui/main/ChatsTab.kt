@@ -51,6 +51,7 @@ import ru.fromchat.api.db.MessageCacheStore
 import ru.fromchat.net.NetworkConnectivity
 import ru.fromchat.ui.ConnectingEllipsis
 import ru.fromchat.ui.LocalNavController
+import ru.fromchat.ui.dm.DmNav
 import ru.fromchat.ui.branding.FromChatBrandTitle
 import ru.fromchat.ui.chat.Avatar
 
@@ -287,7 +288,7 @@ fun ChatsTab() {
                     },
                     modifier = Modifier.clickable {
                         if (conv.otherUserId != 0) {
-                            navController.navigate("dm/${conv.otherUserId}")
+                            navController.navigate(DmNav.chatRoute(conv.otherUserId))
                         }
                     }
                 )
