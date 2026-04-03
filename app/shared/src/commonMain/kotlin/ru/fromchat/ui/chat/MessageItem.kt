@@ -229,9 +229,16 @@ fun MessageItem(
                         )
                     }
 
+                // graphicsLayer must wrap clip/shadow/background so the whole bubble scales on press;
+                // placing it only after background scaled the children but left the bubble chrome unscaled.
                 Box(
                     modifier = Modifier
                         .widthIn(max = maxBubbleWidth)
+                        .graphicsLayer(
+                            scaleX = scale,
+                            scaleY = scale,
+                            transformOrigin = TransformOrigin.Center
+                        )
                         .clip(bubbleShape)
                         .conditional(
                             isAuthor,
@@ -252,11 +259,6 @@ fun MessageItem(
                             `else` = {
                                 background(MaterialTheme.colorScheme.surfaceContainerHighest)
                             }
-                        )
-                        .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
-                            transformOrigin = TransformOrigin.Center
                         )
                         .padding(top = if (firstContentIsImage) 0.dp else 6.dp)
                 ) {
