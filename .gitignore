@@ -26,3 +26,5 @@ app/android/debug
 *.xcuserstate
 xcuserdata
 google-services.json
+
+.cursor/plans
