@@ -1,11 +1,11 @@
 package ru.fromchat.ui.dm
 
+import io.ktor.client.plugins.ClientRequestException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import io.ktor.client.plugins.ClientRequestException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -17,13 +17,13 @@ import ru.fromchat.api.ApiClient
 import ru.fromchat.api.DmEnvelope
 import ru.fromchat.api.Message
 import ru.fromchat.api.ProfileCache
-import ru.fromchat.api.visibleDisplayName
 import ru.fromchat.api.WebSocketMessage
+import ru.fromchat.api.db.MessageCacheStore
+import ru.fromchat.api.visibleDisplayName
 import ru.fromchat.core.Logger
 import ru.fromchat.crypto.CorruptedDmMessagePlaceholder
 import ru.fromchat.crypto.DmCiphertextCorruptedException
 import ru.fromchat.crypto.decryptEnvelope
-import ru.fromchat.api.db.MessageCacheStore
 import ru.fromchat.ui.chat.AvatarInfo
 import ru.fromchat.ui.chat.ChatPanel
 import ru.fromchat.ui.chat.DecryptedImageCache
@@ -140,7 +140,7 @@ class DmPanel(
 
             val historyResult = runCatching { ApiClient.getDmHistory(otherUserId) }
             if (historyResult.isSuccess) {
-                val response = historyResult.getOrNull() ?: return@loadMessages
+                val response = historyResult.getOrNull() ?: return
                 clearMessages()
                 val decryptedForLog = mutableListOf<Pair<Int, String>>()
                 val messages = response.messages.map { envelope ->
@@ -422,7 +422,7 @@ class DmPanel(
 
     override fun getTypingHandler(): TypingHandler = typingHandler
 
-    override fun getRecipientId(): Int? = otherUserId
+    override fun getRecipientId(): Int = otherUserId
 
     override val showUsernamesInMessages: Boolean
         get() = false
