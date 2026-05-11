@@ -9,59 +9,68 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentWidth
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBackIos
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import dev.chrisbanes.haze.HazeProgressive
+import com.pr0gramm3r101.utils.conditional
 import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
-import dev.chrisbanes.haze.materials.HazeMaterials
 import org.jetbrains.compose.resources.stringResource
 import ru.fromchat.Res
-import ru.fromchat.*
+import ru.fromchat.chat_members_count
 import ru.fromchat.ui.ConnectingEllipsis
 import ru.fromchat.ui.scaleOnPress
+
+/**
+ * Bottom-corner arc radius for [ChatFloatingHeaderBox] silhouette.
+ * Matches the inset of the horizontal bottom segment (flat part starts at [this] dx from edges).
+ * The scallop’s vertical depth below the flat bottom is **this** value px; [ChatFloatingHeaderBox]
+ * adds exactly that much height below the measured [TopAppBar] so the arc is not painted over content.
+ */
+val ChatFloatingHeaderBottomArcRadius: Dp = 35.dp
 
 /**
  * Telegram-style floating chrome: iOS-like frosted pill (Haze "thin" material + translucent fill),
@@ -72,40 +81,17 @@ import ru.fromchat.ui.scaleOnPress
 fun ChatFloatingBackButton(
     contentDescription: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
-    val shape = CircleShape
-    val fill = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
-    Box(
-        modifier = modifier
-            .scaleOnPress(
-                scale = 0.88f,
-                onClick = onClick,
-                indication = null,
-                clipShape = shape,
-            ),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(shape)
-                .background(fill),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Rounded.ArrowBackIos,
-                contentDescription = contentDescription,
-                tint = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.size(28.dp),
-            )
-        }
+    IconButton(onClick = onClick) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+            contentDescription = contentDescription
+        )
     }
 }
 
-@OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
 fun ChatFloatingTitleChrome(
-    hazeState: HazeState,
     title: String,
     titleAvatar: AvatarInfo?,
     profileUserId: Int?,
@@ -122,45 +108,29 @@ fun ChatFloatingTitleChrome(
     chatGroupLabel: String,
     modifier: Modifier = Modifier,
 ) {
-    val pillShape = RoundedCornerShape(percent = 50)
-    val fill = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
     val pillClickable = profileUserId != null && onTitleClick != null
-    Box(
-        modifier = modifier
-            .wrapContentWidth()
-            .then(
-                if (pillClickable) {
-                    Modifier.scaleOnPress(
-                        scale = 0.96f,
-                        onClick = onTitleClick,
-                        clipShape = pillShape,
-                    )
-                } else {
-                    Modifier
-                },
-            ),
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+        modifier = modifier.conditional(
+            pillClickable,
+            `if` = {
+                Modifier.scaleOnPress(
+                    scale = 0.96f,
+                    onClick = onTitleClick
+                )
+            }
+        ),
     ) {
-        Row(
-            modifier = Modifier
-                .wrapContentWidth()
-                .wrapContentHeight()
-                .heightIn(min = 44.dp)
-                .clip(pillShape)
-                .background(fill)
-                .hazeEffect(state = hazeState, style = HazeMaterials.thin())
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-        ) {
         when {
             sharedAvatarKey != null && sharedTransitionScope != null && animatedVisibilityScope != null -> {
-                val avatar = titleAvatar
-                val displayName = avatar?.displayName?.takeIf { it.isNotBlank() }
+                val displayName = titleAvatar?.displayName?.takeIf { it.isNotBlank() }
                     ?: title.takeIf { it.isNotBlank() }
                     ?: ""
                 with(sharedTransitionScope) {
                     Avatar(
-                        profilePictureUrl = avatar?.profilePictureUrl,
+                        profilePictureUrl = titleAvatar?.profilePictureUrl,
                         displayName = displayName,
                         modifier = Modifier
                             .sharedElement(
@@ -172,6 +142,7 @@ fun ChatFloatingTitleChrome(
                 }
                 Spacer(modifier = Modifier.width(6.dp))
             }
+
             !hideTitleBarAvatar -> {
                 titleAvatar?.let { avatar ->
                     Avatar(
@@ -182,6 +153,7 @@ fun ChatFloatingTitleChrome(
                     Spacer(modifier = Modifier.width(6.dp))
                 }
             }
+
             onAvatarSlotBounds != null -> {
                 Box(
                     modifier = Modifier
@@ -201,6 +173,7 @@ fun ChatFloatingTitleChrome(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
             }
+
             else -> {
                 titleAvatar?.let {
                     Spacer(modifier = Modifier.width(40.dp))
@@ -226,7 +199,7 @@ fun ChatFloatingTitleChrome(
                 targetState = subtitleKey,
                 transitionSpec = {
                     (slideInVertically { it / 2 } + fadeIn()) togetherWith
-                        (slideOutVertically { -it / 2 } + fadeOut())
+                            (slideOutVertically { -it / 2 } + fadeOut())
                 },
                 label = "chat_subtitle",
             ) { key ->
@@ -250,6 +223,7 @@ fun ChatFloatingTitleChrome(
                             )
                         }
                     }
+
                     key == "connecting" -> {
                         val st = MaterialTheme.typography.bodySmall
                         val col = MaterialTheme.colorScheme.onSurfaceVariant
@@ -269,12 +243,14 @@ fun ChatFloatingTitleChrome(
                             )
                         }
                     }
+
                     key == "typing" -> {
                         TypingIndicator(
                             typingUsers = currentTypingUsers.map { it.username },
                             modifier = Modifier.padding(top = 2.dp),
                         )
                     }
+
                     key.startsWith("presence:") -> {
                         val text = key.removePrefix("presence:")
                         Text(
@@ -284,6 +260,7 @@ fun ChatFloatingTitleChrome(
                             modifier = Modifier.padding(top = 2.dp),
                         )
                     }
+
                     key == "group" -> {
                         Text(
                             text = chatGroupLabel,
@@ -292,6 +269,7 @@ fun ChatFloatingTitleChrome(
                             modifier = Modifier.padding(top = 2.dp),
                         )
                     }
+
                     key.startsWith("members:") -> {
                         val n = key.removePrefix("members:").toIntOrNull() ?: 0
                         Text(
@@ -304,11 +282,10 @@ fun ChatFloatingTitleChrome(
                 }
             }
         }
-        }
     }
 }
 
-@OptIn(ExperimentalHazeMaterialsApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatFloatingHeaderBox(
     hazeState: HazeState,
@@ -320,90 +297,136 @@ fun ChatFloatingHeaderBox(
     titleChrome: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val sideSlot = 56.dp
+    val containerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.91f)
+    val headerHazeStyle = rememberChatSurfaceContainerHazeStyle()
+    val bottomCornerRadius = ChatFloatingHeaderBottomArcRadius
     val density = LocalDensity.current
-    val statusBarDp = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
-    val blurPlateHeight = statusBarDp + 64.dp + 12.dp
+    val shape = remember(bottomCornerRadius) { BottomInsetTopBarShape(bottomCornerRadius) }
+    // [BottomInsetTopBarShape] draws the arc in the strip from y = (content height) .. (content + r);
+    // stack measured bar height + that depth so the scallop is never overlapped by TopAppBar children.
+    val arcExtentPx = with(density) { bottomCornerRadius.roundToPx() }
 
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .wrapContentHeight(),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(blurPlateHeight)
-                .align(Alignment.TopCenter)
-                .hazeEffect(state = hazeState, style = HazeMaterials.thin()) {
-                    progressive = HazeProgressive.verticalGradient(startIntensity = 1f, endIntensity = 0f)
-                },
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .wrapContentHeight()
-                .height(IntrinsicSize.Min)
-                .zIndex(1f)
-                .windowInsetsPadding(WindowInsets.statusBars)
-                .padding(start = 8.dp, end = 8.dp, top = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .width(sideSlot)
-                    .fillMaxHeight(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(Modifier.fillMaxSize().padding(6.dp)) {
+    SubcomposeLayout(modifier = modifier.fillMaxWidth()) { constraints ->
+        val heightUnbounded = constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity)
+        val topBarPlaceable = subcompose("topBar") {
+            TopAppBar(
+                modifier = Modifier.fillMaxWidth(),
+                windowInsets = WindowInsets.statusBars,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                ),
+                navigationIcon = {
                     ChatFloatingBackButton(
                         contentDescription = backContentDescription,
                         onClick = onBack,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .aspectRatio(1f, matchHeightConstraintsFirst = true),
                     )
-                }
-            }
+                },
+                title = { titleChrome() },
+                actions = {
+                    if (showCallButton) {
+                        IconButton(onClick = onCallClick) {
+                            Icon(
+                                imageVector = Icons.Default.Call,
+                                contentDescription = callContentDescription,
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
+                },
+            )
+        }.first().measure(heightUnbounded)
+
+        val layoutWidth = topBarPlaceable.width.coerceIn(constraints.minWidth, constraints.maxWidth)
+        val layoutHeight = topBarPlaceable.height + arcExtentPx
+
+        val bgPlaceable = subcompose("background") {
             Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .wrapContentHeight(),
-                contentAlignment = Alignment.Center,
-            ) {
-                titleChrome()
-            }
-            if (showCallButton) {
-                val shape = CircleShape
-                val outline = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
-                val fill = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
-                Box(
-                    modifier = Modifier
-                        .width(sideSlot)
-                        .fillMaxHeight(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .aspectRatio(1f, matchHeightConstraintsFirst = true)
-                            .clip(shape)
-                            .border(Dp.Hairline, outline, shape)
-                            .background(fill)
-                            .clickable(onClick = onCallClick),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Call,
-                            contentDescription = callContentDescription,
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(28.dp),
-                        )
-                    }
-                }
-            } else {
-                Spacer(modifier = Modifier.width(sideSlot))
-            }
+                    .fillMaxSize()
+                    .clip(shape)
+                    .background(containerColor)
+                    .hazeEffect(state = hazeState, style = headerHazeStyle),
+            )
+        }.first().measure(Constraints.fixed(layoutWidth, layoutHeight))
+
+        layout(layoutWidth, layoutHeight) {
+            bgPlaceable.place(0, 0)
+            topBarPlaceable.place(0, 0)
         }
+    }
+}
+
+/** Cubic-fit constant for a quarter circle: `4/3 * tan(pi/8)` (~0.5522847498). */
+private const val CircularCornerBezierKappa = 0.5522847498f
+
+/**
+ * Bottom edge: inset horizontal segment (`y = height − r`), then quarter-circle corners with
+ * circle centers **`(r, height)` / `(width − r, height)`** — same as the SVG (`M r y … C …`).
+ *
+ * Compose's [Path.arcTo] uses an ellipse inscribed in `Rect` whose **center is rect center**, so it
+ * cannot express these corners reliably; cubic segments match the arcs instead.
+ */
+private class BottomInsetTopBarShape(
+    private val cornerRadius: Dp,
+) : androidx.compose.ui.graphics.Shape {
+    override fun createOutline(
+        size: Size,
+        layoutDirection: LayoutDirection,
+        density: Density,
+    ): Outline {
+        val w = size.width
+        val h = size.height
+        val r = with(density) { cornerRadius.toPx() }.coerceIn(0f, minOf(w / 2f, h))
+        val straightY = (h - r).coerceAtLeast(0f)
+        val k = CircularCornerBezierKappa * r
+
+        val path = Path().apply {
+            moveTo(r, straightY)
+            lineTo(w - r, straightY)
+            // Bottom-right: center (w - r, h), arc from (w - r, straightY) to (w, h).
+            cubicTo(
+                x1 = w - r + k,
+                y1 = straightY,
+                x2 = w,
+                y2 = h - k,
+                x3 = w,
+                y3 = h,
+            )
+            lineTo(w, 0f)
+            lineTo(0f, 0f)
+            lineTo(0f, h)
+            // Bottom-left: center (r, h), arc from (0, h) to (r, straightY).
+            cubicTo(
+                x1 = 0f,
+                y1 = h - k,
+                x2 = r - k,
+                y2 = straightY,
+                x3 = r,
+                y3 = straightY,
+            )
+            close()
+        }
+
+        return Outline.Generic(path)
+    }
+}
+
+/**
+ * [HazeStyle] for chat chrome using only [androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainer]
+ * (24dp blur + luminance-scaled tint, slightly denser than old “thin” defaults), without [dev.chrisbanes.haze.materials.HazeMaterials].
+ */
+@Composable
+fun rememberChatSurfaceContainerHazeStyle(): HazeStyle {
+    val surface = MaterialTheme.colorScheme.surfaceContainer
+    val tintAlpha = if (surface.luminance() >= 0.5f) 0.74f else 0.79f
+    return remember(surface) {
+        HazeStyle(
+            blurRadius = 24.dp,
+            backgroundColor = surface,
+            tint = HazeTint(surface.copy(alpha = tintAlpha)),
+        )
     }
 }

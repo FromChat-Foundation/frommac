@@ -2,6 +2,7 @@ package ru.fromchat.ui.chat
 
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,12 +10,11 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -55,25 +55,28 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.compose.resources.stringResource
 import ru.fromchat.Res
-import ru.fromchat.*
 import ru.fromchat.api.ApiClient
-import ru.fromchat.api.ProfileCache
 import ru.fromchat.api.AttachmentUploadJob
 import ru.fromchat.api.AttachmentUploadQueue
 import ru.fromchat.api.ConnectionStateStore
 import ru.fromchat.api.ConnectionStatus
 import ru.fromchat.api.Message
+import ru.fromchat.api.ProfileCache
 import ru.fromchat.api.UserStatusStore
 import ru.fromchat.api.WebSocketManager
 import ru.fromchat.api.WebSocketMessage
 import ru.fromchat.api.WebSocketUpdatesData
+import ru.fromchat.back
 import ru.fromchat.calls.CallStore
+import ru.fromchat.cd_call
+import ru.fromchat.chat_group_label
 import ru.fromchat.core.Logger
 import ru.fromchat.net.NetworkConnectivity
+import ru.fromchat.status_connecting
+import ru.fromchat.status_updating
 import ru.fromchat.ui.HapticFeedbackEvent
 import ru.fromchat.ui.LocalNavController
 import ru.fromchat.ui.rememberHapticFeedback
-import ru.fromchat.ui.chat.getImageAspectRatio
 import ru.fromchat.ui.suspension.SuspendedAccountSupportSheet
 import ru.fromchat.utils.formatLastSeen
 import ru.fromchat.utils.rememberLastSeenFormatStrings
@@ -123,6 +126,7 @@ fun ChatScreen(
     val hazeState = rememberHazeState(
         blurEnabled = !(panelState.isLoading && panelState.messages.isEmpty())
     )
+    val chatBottomHazeStyle = rememberChatSurfaceContainerHazeStyle()
 
     val currentTypingUsers = panelState.typingUsers // Directly use from panelState
     val statusMap by UserStatusStore.status.collectAsState()
@@ -372,6 +376,7 @@ fun ChatScreen(
                     modifier = Modifier
                         .windowInsetsPadding(WindowInsets.ime)
                         .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainer)
                         .hazeEffect(state = hazeState, style = HazeMaterials.thin()) {
                             progressive = HazeProgressive.verticalGradient(
                                 startIntensity = 0f,
@@ -473,7 +478,8 @@ fun ChatScreen(
         ) { innerPadding ->
             val density = LocalDensity.current
             val statusBarTopDp = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
-            val floatingHeaderClearance = statusBarTopDp + 64.dp + 12.dp
+            val floatingHeaderClearance =
+                statusBarTopDp + 64.dp + 12.dp + ChatFloatingHeaderBottomArcRadius
 
             Box(
                 modifier = Modifier
@@ -594,7 +600,6 @@ fun ChatScreen(
                             callContentDescription = cdCall,
                             titleChrome = {
                                 ChatFloatingTitleChrome(
-                                    hazeState = hazeState,
                                     title = panelState.title,
                                     titleAvatar = panelState.titleAvatar,
                                     profileUserId = profileUserId,
