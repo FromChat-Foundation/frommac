@@ -27,11 +27,11 @@ import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Reply
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.SaveAlt
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Reply
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.SaveAlt
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -604,7 +604,7 @@ fun ImageFullscreenPreview(
             ) {
                 IconButton(onClick = { dismissRequested = true }) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                         contentDescription = cdBack,
                         tint = Color.White
                     )
@@ -628,7 +628,7 @@ fun ImageFullscreenPreview(
                 Box {
                     IconButton(onClick = { menuExpanded = true }) {
                         Icon(
-                            imageVector = Icons.Default.MoreVert,
+                            imageVector = Icons.Rounded.MoreVert,
                             contentDescription = cdMenu,
                             tint = Color.White
                         )
@@ -641,7 +641,7 @@ fun ImageFullscreenPreview(
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.AutoMirrored.Filled.Reply, null, tint = Color.White)
+                                    Icon(Icons.AutoMirrored.Rounded.Reply, null, tint = Color.White)
                                     Spacer(Modifier.width(8.dp))
                                     Text(labelReply, color = Color.White)
                                 }
@@ -655,7 +655,7 @@ fun ImageFullscreenPreview(
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.SaveAlt, null, tint = Color.White)
+                                    Icon(Icons.Rounded.SaveAlt, null, tint = Color.White)
                                     Spacer(Modifier.width(8.dp))
                                     Text(labelSave, color = Color.White)
                                 }
@@ -668,7 +668,7 @@ fun ImageFullscreenPreview(
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Delete, null, tint = Color.White)
+                                    Icon(Icons.Rounded.Delete, null, tint = Color.White)
                                     Spacer(Modifier.width(8.dp))
                                     Text(labelDelete, color = Color.White)
                                 }

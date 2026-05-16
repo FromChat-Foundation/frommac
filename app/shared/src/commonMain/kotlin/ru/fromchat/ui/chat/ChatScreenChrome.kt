@@ -24,7 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -328,7 +328,7 @@ fun ChatFloatingHeaderBox(
                     if (showCallButton) {
                         IconButton(onClick = onCallClick) {
                             Icon(
-                                imageVector = Icons.Default.Call,
+                                imageVector = Icons.Rounded.Call,
                                 contentDescription = callContentDescription,
                                 tint = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.size(24.dp),

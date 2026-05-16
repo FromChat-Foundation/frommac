@@ -18,9 +18,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Reply
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.automirrored.rounded.Reply
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -287,21 +287,21 @@ private fun ContextMenuContent(
         ) {
             if (!isReadOnly) {
                 ContextMenuItem(
-                    icon = Icons.AutoMirrored.Filled.Reply,
+                    icon = Icons.AutoMirrored.Rounded.Reply,
                     text = labelReply,
                     onClick = { onReply(message) }
                 )
             }
             if (isAuthor && !isReadOnly) {
                 ContextMenuItem(
-                    icon = Icons.Default.Edit,
+                    icon = Icons.Rounded.Edit,
                     text = labelEdit,
                     onClick = { onEdit(message) }
                 )
             }
             if (isAuthor && !isReadOnly) {
                 ContextMenuItem(
-                    icon = Icons.Default.Delete,
+                    icon = Icons.Rounded.Delete,
                     text = labelDelete,
                     onClick = { onDelete(message) },
                     isError = true

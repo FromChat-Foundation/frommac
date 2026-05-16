@@ -2,7 +2,9 @@ package ru.fromchat.ui.chat
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -29,25 +31,22 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Reply
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material.icons.outlined.AttachFile
-import androidx.compose.material.icons.outlined.Image
-import androidx.compose.material.icons.outlined.SentimentSatisfied
-import androidx.compose.material3.FilledIconButton
+import androidx.compose.material.icons.automirrored.rounded.Reply
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.AttachFile
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.SentimentSatisfied
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -94,8 +93,6 @@ import kotlin.time.Clock
 
 private val ChatInputChromeHeight = 54.dp
 private val ChatInputLineVerticalPadding = 12.dp
-/** Vertical padding inside the text field decoration (keep total row height aligned with chrome). */
-private val ChatInputDecorationVerticalPadding = 8.dp
 private val ChatInputTextLineHeight = 22.sp
 
 private val ChatInputIconSlotSize = 36.dp
@@ -167,7 +164,7 @@ private fun PreviewBar(
 
         IconButton(onClick = onClose) {
             Icon(
-                imageVector = Icons.Filled.Close,
+                imageVector = Icons.Rounded.Close,
                 contentDescription = closeContentDescription,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -201,7 +198,7 @@ private fun AttachmentChip(
             )
         } else {
             Icon(
-                imageVector = Icons.Filled.AttachFile,
+                imageVector = Icons.Rounded.AttachFile,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -217,7 +214,7 @@ private fun AttachmentChip(
         )
         IconButton(onClick = onRemove, modifier = Modifier.size(24.dp)) {
             Icon(
-                imageVector = Icons.Filled.Close,
+                imageVector = Icons.Rounded.Close,
                 contentDescription = removeContentDescription,
                 modifier = Modifier.size(14.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -340,7 +337,6 @@ fun ChatInput(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .animateContentSize()
                             .background(MaterialTheme.colorScheme.surfaceContainer, pillShape)
                             .clip(pillShape)
                             .hazeEffect(state = hazeState, style = composerHazeStyle),
@@ -353,7 +349,7 @@ fun ChatInput(
                             }
                             val replyName = messageDisplayUsername(reply, currentUserId)
                             PreviewBar(
-                                icon = Icons.AutoMirrored.Filled.Reply,
+                                icon = Icons.AutoMirrored.Rounded.Reply,
                                 title = stringResource(Res.string.message_replying_to, replyName),
                                 subtitle = replySubtitle,
                                 closeContentDescription = cdClose,
@@ -368,7 +364,7 @@ fun ChatInput(
                                 message.content.take(50) + if (message.content.length > 50) "..." else ""
                             }
                             PreviewBar(
-                                icon = Icons.Filled.Edit,
+                                icon = Icons.Rounded.Edit,
                                 title = editingTitle,
                                 subtitle = subtitle,
                                 closeContentDescription = cdClose,
@@ -402,9 +398,8 @@ fun ChatInput(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .defaultMinSize(minHeight = ChatInputChromeHeight)
-                                .wrapContentHeight()
                                 .padding(horizontal = 6.dp, vertical = 0.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                            verticalAlignment = Alignment.Bottom,
                         ) {
                             Box(
                                 modifier = Modifier
@@ -415,7 +410,7 @@ fun ChatInput(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
-                                    imageVector = Icons.Outlined.SentimentSatisfied,
+                                    imageVector = Icons.Rounded.SentimentSatisfied,
                                     contentDescription = cdEmoji,
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -434,7 +429,7 @@ fun ChatInput(
                                 enabled = !isReadOnly,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .animateContentSize(),
+                                    .align(Alignment.Bottom),
                                 textStyle = inputTextStyle,
                                 singleLine = false,
                                 maxLines = 5,
@@ -445,23 +440,34 @@ fun ChatInput(
                                             .fillMaxWidth()
                                             .padding(
                                                 horizontal = ChatInputLineVerticalPadding / 2,
-                                                vertical = ChatInputDecorationVerticalPadding,
+                                                vertical = ChatInputIconSlotVerticalInset,
                                             ),
-                                        contentAlignment = Alignment.CenterStart,
                                     ) {
-                                        if (text.isEmpty()) {
-                                            Text(
-                                                text = stringResource(Res.string.message_placeholder),
-                                                style = inputTextStyle.copy(
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                                ),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                softWrap = false,
-                                                modifier = Modifier.fillMaxWidth(),
-                                            )
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .defaultMinSize(minHeight = ChatInputIconSlotSize)
+                                                .align(Alignment.BottomStart),
+                                            contentAlignment = Alignment.CenterStart,
+                                        ) {
+                                            if (text.isEmpty()) {
+                                                Text(
+                                                    text = stringResource(Res.string.message_placeholder),
+                                                    style = inputTextStyle.copy(
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                                            alpha = 0.6f,
+                                                        ),
+                                                    ),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    softWrap = false,
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                )
+                                            }
+                                            Box(modifier = Modifier.animateContentSize()) {
+                                                innerTextField()
+                                            }
                                         }
-                                        innerTextField()
                                     }
                                 },
                             )
@@ -476,7 +482,7 @@ fun ChatInput(
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Outlined.Image,
+                                        imageVector = Icons.Rounded.Image,
                                         contentDescription = cdPickImage,
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -490,7 +496,7 @@ fun ChatInput(
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Outlined.AttachFile,
+                                        imageVector = Icons.Rounded.AttachFile,
                                         contentDescription = cdPickFile,
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -501,88 +507,85 @@ fun ChatInput(
                 }
 
                 // Fixed slot next to the pill; width must stay non-zero (see Row + fillMaxWidth pitfall above).
+                val actionTransitionMs = 220
+                val hazeOverlayAlpha by animateFloatAsState(
+                    targetValue = if (!canSend) 1f else 0f,
+                    animationSpec = tween(durationMillis = actionTransitionMs),
+                    label = "chat_input_action_haze_alpha",
+                )
+                val actionBackground by animateColorAsState(
+                    targetValue = if (canSend) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.91f)
+                    },
+                    animationSpec = tween(durationMillis = actionTransitionMs),
+                    label = "chat_input_action_background",
+                )
                 Box(
                     modifier = Modifier
                         .size(ChatInputChromeHeight)
-                        .clip(CircleShape),
+                        .clip(CircleShape)
+                        .clickable {
+                            if (canSend) {
+                                val plaintext = text.trim().ifBlank { "" }
+                                onSend(plaintext, attachments)
+                                onTextChange("")
+                                attachments = emptyList()
+                                typingHandler.stopTyping()
+                            } else {
+                                scope.launch {
+                                    snackbarHostState?.showSnackbar(message = cdVoiceUnavailable)
+                                }
+                            }
+                        },
                     contentAlignment = Alignment.Center,
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(actionBackground)
+                            .hazeEffect(state = hazeState, style = composerHazeStyle) {
+                                // Keep the node in the tree in both directions; fading alpha avoids the
+                                // frosted layer popping on over the color when send -> voice.
+                                alpha = hazeOverlayAlpha
+                            },
+                    )
                     AnimatedContent(
                         targetState = canSend,
                         transitionSpec = {
-                            val exitDuration = 140
-                            val enterDuration = 160
-                            val enterDelay = exitDuration // start after outbound scale+fade completes
-                            val scaleFrom = 0.82f
-                            // EnterTogetherWithExit: fading/scaling incoming content while outgoing runs.
+                            val d = actionTransitionMs
+                            val iconScale = 0.72f
                             (
-                                fadeIn(
-                                    animationSpec = tween(enterDuration, delayMillis = enterDelay),
-                                ) + scaleIn(
-                                    animationSpec = tween(enterDuration, delayMillis = enterDelay),
-                                    initialScale = scaleFrom,
-                                )
+                                fadeIn(animationSpec = tween(d)) +
+                                    scaleIn(
+                                        animationSpec = tween(d),
+                                        initialScale = iconScale,
+                                    )
                                 ) togetherWith (
-                                fadeOut(animationSpec = tween(exitDuration)) +
+                                fadeOut(animationSpec = tween(d)) +
                                     scaleOut(
-                                        animationSpec = tween(exitDuration),
-                                        targetScale = scaleFrom,
+                                        animationSpec = tween(d),
+                                        targetScale = iconScale,
                                     )
                                 )
                         },
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .wrapContentSize(Alignment.Center),
                         contentAlignment = Alignment.Center,
-                        label = "chat_input_send_or_voice",
-                    ) { showSend ->
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.91f))
-                                .hazeEffect(state = hazeState, style = composerHazeStyle),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (showSend) {
-                                FilledIconButton(
-                                    onClick = {
-                                        val plaintext = text.trim().ifBlank { "" }
-                                        onSend(plaintext, attachments)
-                                        onTextChange("")
-                                        attachments = emptyList()
-                                        typingHandler.stopTyping()
-                                    },
-                                    modifier = Modifier.fillMaxSize(),
-                                    shape = CircleShape,
-                                    colors = IconButtonDefaults.filledIconButtonColors(
-                                        containerColor = Color.Transparent,
-                                        contentColor = MaterialTheme.colorScheme.primary,
-                                    ),
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.ArrowUpward,
-                                        contentDescription = cdSend,
-                                    )
-                                }
+                        label = "chat_input_send_or_voice_icon",
+                    ) { isSend ->
+                        Icon(
+                            imageVector = if (isSend) Icons.Rounded.ArrowUpward else Icons.Rounded.GraphicEq,
+                            contentDescription = if (isSend) cdSend else cdVoiceUnavailable,
+                            modifier = Modifier.size(28.dp),
+                            tint = if (isSend) {
+                                MaterialTheme.colorScheme.onPrimary
                             } else {
-                                IconButton(
-                                    onClick = {
-                                        scope.launch {
-                                            snackbarHostState?.showSnackbar(message = cdVoiceUnavailable)
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxSize(),
-                                    shape = CircleShape,
-                                    colors = IconButtonDefaults.iconButtonColors(
-                                        containerColor = Color.Transparent,
-                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    ),
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.GraphicEq,
-                                        contentDescription = cdVoiceUnavailable,
-                                    )
-                                }
-                            }
-                        }
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
                     }
                 }
             }
