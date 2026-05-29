@@ -130,6 +130,7 @@ fun ChatScreen(
     }
     val scope = rememberCoroutineScope()
     val saveMessageImage = rememberSaveMessageImage { /* best-effort */ }
+    val saveMessageFile = rememberSaveMessageFile { /* best-effort */ }
     val haptic = rememberHapticFeedback()
     val navController = LocalNavController.current
     val profileUserId = panelState.profileUserId
@@ -152,6 +153,13 @@ fun ChatScreen(
     val cdCall = stringResource(Res.string.cd_call)
     LaunchedEffect(currentTypingUsers) {
         Logger.d("ChatScreen", "currentTypingUsers updated (from panelState): ${currentTypingUsers.map { it.username }}")
+    }
+
+    var profileSharedSourceMessageId by remember(scrollToMessageId) {
+        mutableStateOf(scrollToMessageId?.takeIf { it > 0 })
+    }
+    LaunchedEffect(scrollToMessageId) {
+        scrollToMessageId?.takeIf { it > 0 }?.let { profileSharedSourceMessageId = it }
     }
 
     val subtitleKey = when {
@@ -416,17 +424,22 @@ fun ChatScreen(
         if (panel.getRecipientId() != null) {
             AttachmentUploadNotifier.progressFlow.collect { progress ->
                 when (progress) {
+                    is AttachmentUploadProgress.Pending ->
+                        panel.updateMessageByClientMessageId(progress.jobId) {
+                            it.copy(uploadProgress = 0, uploadError = null)
+                        }
                     is AttachmentUploadProgress.InProgress ->
                         panel.updateMessageByClientMessageId(progress.jobId) {
-                            it.copy(uploadProgress = progress.percent)
+                            it.copy(uploadProgress = progress.percent, uploadError = null)
                         }
                     is AttachmentUploadProgress.Success ->
                         panel.updateMessageByClientMessageId(progress.jobId) {
                             it.copy(uploadProgress = null)
                         }
                     is AttachmentUploadProgress.Failed -> {
-                        if (progress.error != "Cancelled") {
-                            scope.launch { panel.cancelQueuedMessageByClientId(progress.jobId) }
+                        if (progress.error == "Cancelled") return@collect
+                        panel.updateMessageByClientMessageId(progress.jobId) {
+                            it.copy(uploadProgress = null, uploadError = progress.error)
                         }
                     }
                     else -> Unit
@@ -505,13 +518,18 @@ fun ChatScreen(
                                                     prepareOutboundFileForSend(
                                                         clientMessageId = jobId,
                                                         sourceUri = att.uri,
+                                                        optimisticMessageId = tempId,
+                                                        displayFilename = att.filename,
                                                     )
                                                 }
-                                                val fileUri = staged?.stagedUri ?: att.uri
+                                                if (staged == null) {
+                                                    return@launch
+                                                }
+                                                val fileUri = staged.stagedUri
                                                 val optimisticMessage = Message(
                                                     id = tempId,
                                                     user_id = currentUserId ?: -1,
-                                                    content = plaintext.ifBlank { att.filename },
+                                                    content = plaintext,
                                                     timestamp = nowMessageTimestampIso(),
                                                     is_read = false,
                                                     is_edited = false,
@@ -526,27 +544,31 @@ fun ChatScreen(
                                                     pendingFilename = att.filename,
                                                     uploadJobId = jobId,
                                                     uploadProgress = 0,
-                                                    pendingFileAspectRatio = staged?.aspectRatio ?: aspectRatio,
+                                                    pendingFileAspectRatio = staged.aspectRatio ?: aspectRatio,
                                                     fileDimensions = imageDimensions?.let { listOf(it) },
+                                                    fileSizes = staged.sizeBytes.takeIf { it > 0L }?.let { listOf(it) },
                                                 )
                                                 withContext(Dispatchers.Main) {
                                                     panel.addMessage(optimisticMessage)
                                                 }
-                                                if (staged == null) {
-                                                    withContext(Dispatchers.Main) {
-                                                        panel.cancelQueuedMessageByClientId(jobId)
-                                                    }
-                                                    return@launch
-                                                }
+                                                AttachmentUploadNotifier.emit(
+                                                    AttachmentUploadProgress.InProgress(
+                                                        jobId = jobId,
+                                                        percent = 1,
+                                                        filename = att.filename,
+                                                    ),
+                                                    messageLabel = plaintext,
+                                                )
                                                 OutgoingMessageCoordinator.enqueueDmAttachment(
                                                     recipientId = recipientId,
-                                                    plaintext = plaintext.ifBlank { att.filename },
+                                                    plaintext = plaintext,
                                                     clientMessageId = jobId,
                                                     replyToId = replyToId,
                                                     fileUri = fileUri,
                                                     filename = att.filename,
                                                     optimisticMessage = optimisticMessage,
-                                                    aspectRatio = staged?.aspectRatio ?: aspectRatio,
+                                                    aspectRatio = staged.aspectRatio ?: aspectRatio,
+                                                    fileSizeBytes = staged.sizeBytes,
                                                 )
                                             }
                                         }
@@ -658,6 +680,7 @@ fun ChatScreen(
                                         message.user_id > 0
                                     ) {
                                         {
+                                            profileSharedSourceMessageId = message.id
                                             ProfileCache.mergePreviewFromPublicMessage(message)
                                             navController.navigate(
                                                 "profile/${message.user_id}" +
@@ -677,17 +700,31 @@ fun ChatScreen(
                                 currentUserId = currentUserId,
                                 sharedTransitionScope = sharedTransitionScope,
                                 animatedVisibilityScope = animatedVisibilityScope,
+                                onCancelOutboundAttachment = { msg ->
+                                    scope.launch { panel.cancelQueuedMessage(msg) }
+                                },
+                                onRetryOutboundAttachment = { msg ->
+                                    val cid = msg.client_message_id?.trim().orEmpty()
+                                    if (cid.isNotEmpty()) {
+                                        panel.updateMessageByClientMessageId(cid) {
+                                            it.copy(uploadError = null, uploadProgress = 0)
+                                        }
+                                        ru.fromchat.api.outbox.OutgoingMessageCoordinator
+                                            .retryDmAttachmentUpload(cid)
+                                    }
+                                },
                                 sharedAvatarNavKey =
                                     if (
                                         panel.supportsNavigateToSenderProfile &&
                                         sharedTransitionScope != null &&
                                         animatedVisibilityScope != null &&
                                         message.user_id != currentUserId &&
-                                        message.user_id > 0
+                                        message.user_id > 0 &&
+                                        profileSharedSourceMessageId == message.id
                                     ) {
                                         publicChatProfileSharedAvatarKey(
                                             message.user_id,
-                                            message.id
+                                            message.id,
                                         )
                                     } else {
                                         null
@@ -772,6 +809,11 @@ fun ChatScreen(
                         onSave = { message ->
                             resolveSavableMessageImage(message)?.let { savable ->
                                 saveMessageImage(savable)
+                            } ?: resolveSavableMessageFile(message)?.let { savable ->
+                                saveMessageFile(savable)
+                                scope.launch {
+                                    ensureFileDownloadedForSave(message, savable)
+                                }
                             }
                         },
                         onCancelSend = { message ->

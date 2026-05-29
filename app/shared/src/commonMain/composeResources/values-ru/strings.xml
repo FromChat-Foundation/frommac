@@ -74,7 +74,12 @@
     <string name="message_replying_to">Ответ %1$s</string>
     <string name="message_corrupted_short">Сообщение не показывается</string>
     <string name="attachment_image_load_failed">Не удалось загрузить</string>
+    <string name="attachment_upload_failed">Не удалось отправить файл</string>
+    <string name="attachment_upload_failed_too_large">Файл слишком большой для отправки на этом устройстве</string>
+    <string name="cd_attachment_upload_retry">Повторить отправку файла</string>
     <string name="attachment_retry">Повторить</string>
+    <string name="attachment_open_failed">Не удалось открыть файл. Попробуйте «Сохранить» в меню сообщения.</string>
+    <string name="attachment_open_chooser_title">Открыть с помощью</string>
     <string name="cd_attachment_retry">Повторить загрузку изображения</string>
     <string name="message_editing_title">Правка сообщения</string>
     <string name="action_reply">Ответить</string>
@@ -84,6 +89,14 @@
     <string name="action_cancel_send">Отменить</string>
     <string name="notif_media_upload_percent">%1$d\u0025</string>
     <string name="notif_media_upload_progress">%1$s · %2$s</string>
+    <string name="notif_file_copy_channel_name">Сохранение файла</string>
+    <string name="notif_file_copy_title">Сохранение вложения</string>
+    <string name="notif_file_copy_text">Копирование файла в фоне</string>
+    <string name="notif_file_download_channel_name">Загрузка файла</string>
+    <string name="notif_file_download_title">Загрузка вложения</string>
+    <string name="notif_file_download_text">Загрузка продолжается в фоне</string>
+    <string name="notif_file_download_percent">%1$d\u0025</string>
+    <string name="notif_file_download_progress">%1$s · %2$s</string>
     <string name="action_save">Сохранить</string>
     <string name="cd_close">Закрыть</string>
     <string name="cd_remove">Убрать</string>

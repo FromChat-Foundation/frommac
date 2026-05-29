@@ -65,6 +65,10 @@ actual fun rememberCreateDownloadDestinationLauncher(
     }
 }
 
+actual suspend fun persistExportUriPermissionIfNeeded(exportUri: String) {
+    persistExportUriPermission(exportUri)
+}
+
 suspend fun persistExportUriPermission(exportUri: String) {
     withContext(Dispatchers.IO) {
         if (!exportUri.startsWith("content://")) return@withContext

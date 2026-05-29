@@ -10,8 +10,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import ru.fromchat.api.db.MessageCacheStore
 import ru.fromchat.ui.chat.AttachmentMediaLog
+import ru.fromchat.ui.chat.DecryptedFileCache
 import ru.fromchat.ui.chat.DecryptedImageCache
+import ru.fromchat.ui.chat.DmFileDownloader
 import ru.fromchat.ui.chat.DownloadedFileRegistry
 
 sealed class AttachmentDownloadProgress {
@@ -28,6 +31,12 @@ sealed class AttachmentDownloadProgress {
  * [progressPercentByKey] is the source of truth for UI; [progressFlow] is for one-shot side effects.
  */
 object AttachmentDownloadNotifier {
+    private var inFlightCheck: (String) -> Boolean = { false }
+
+    internal fun bindInFlightCheck(check: (String) -> Boolean) {
+        inFlightCheck = check
+    }
+
     private val _progressFlow = MutableSharedFlow<AttachmentDownloadProgress>(extraBufferCapacity = 64)
     val progressFlow: SharedFlow<AttachmentDownloadProgress> = _progressFlow
 
@@ -37,7 +46,12 @@ object AttachmentDownloadNotifier {
     private val _failedKeys = MutableStateFlow<Set<String>>(emptySet())
     val failedKeys: StateFlow<Set<String>> = _failedKeys.asStateFlow()
 
+    private val _cancelledKeys = MutableStateFlow<Set<String>>(emptySet())
+    val cancelledKeys: StateFlow<Set<String>> = _cancelledKeys.asStateFlow()
+
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val resumeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val progressThrottleByKey = mutableMapOf<String, DownloadProgressThrottle>()
 
     fun emit(
         progress: AttachmentDownloadProgress,
@@ -53,24 +67,15 @@ object AttachmentDownloadNotifier {
             is AttachmentDownloadProgress.Success -> progress.storageKey
             is AttachmentDownloadProgress.Failed -> progress.storageKey
         }
-        val mirrorKeys = when {
-            mirrorAsFileAttachment || primaryKey.startsWith("file_") ->
-                DownloadedFileRegistry.progressLookupKeys(messageId, fileIndex, clientMessageId)
-            else ->
-                DecryptedImageCache.progressLookupKeys(messageId, fileIndex, clientMessageId)
-        }.ifEmpty { listOf(primaryKey) }
+        val mirrorKeys = mirrorKeysFor(
+            primaryKey = primaryKey,
+            messageId = messageId,
+            fileIndex = fileIndex,
+            clientMessageId = clientMessageId,
+            mirrorAsFileAttachment = mirrorAsFileAttachment,
+        )
         when (progress) {
-            is AttachmentDownloadProgress.InProgress -> {
-                if (progress.percent == 1 || progress.percent % 15 == 0 || progress.percent >= 95) {
-                    AttachmentMediaLog.download(
-                        "progress",
-                        "key" to progress.storageKey,
-                        "pct" to progress.percent,
-                        "msg" to msg,
-                        "mirror" to mirrorKeys.joinToString(","),
-                    )
-                }
-            }
+            is AttachmentDownloadProgress.InProgress -> Unit
             is AttachmentDownloadProgress.Success ->
                 AttachmentMediaLog.download(
                     "success",
@@ -89,16 +94,47 @@ object AttachmentDownloadNotifier {
         when (progress) {
             is AttachmentDownloadProgress.InProgress -> {
                 val pct = progress.percent.coerceIn(1, 100)
-                _progressPercentByKey.update { map ->
-                    map + mirrorKeys.associateWith { pct }
+                val throttle = throttleFor(mirrorKeys)
+                val publishUi = throttle.shouldPublishUi(pct)
+                val publishNotif = mirrorAsFileAttachment && throttle.shouldPublishNotification(pct)
+                if (publishUi || publishNotif) {
+                    if (pct == 1 || pct % 15 == 0 || pct >= 95) {
+                        AttachmentMediaLog.download(
+                            "progress",
+                            "key" to progress.storageKey,
+                            "pct" to pct,
+                            "msg" to msg,
+                            "mirror" to mirrorKeys.joinToString(","),
+                        )
+                    }
+                }
+                if (publishUi) {
+                    _progressPercentByKey.update { map ->
+                        map + mirrorKeys.associateWith { pct }
+                    }
+                }
+                if (publishNotif) {
+                    AttachmentDownloadForeground.onFileDownloadProgress(
+                        percent = pct,
+                        displayLabel = messageLabel,
+                    )
                 }
             }
             is AttachmentDownloadProgress.Success -> {
-                _progressPercentByKey.update { map ->
-                    map + mirrorKeys.associateWith { 100 }
+                mirrorKeys.forEach { progressThrottleByKey.remove(it) }
+                _progressPercentByKey.update { map -> map - mirrorKeys.toSet() }
+                _cancelledKeys.update { cancelled -> cancelled - mirrorKeys.toSet() }
+                _failedKeys.update { failed -> failed - mirrorKeys.toSet() }
+                mirrorKeys.forEach { ApiClient.markPartialDownloadUserDismissed(it, dismissed = false) }
+                if (mirrorAsFileAttachment) {
+                    AttachmentDownloadForeground.onFileDownloadProgress(
+                        percent = 100,
+                        displayLabel = messageLabel,
+                    )
                 }
             }
             is AttachmentDownloadProgress.Failed -> {
+                mirrorKeys.forEach { progressThrottleByKey.remove(it) }
                 _progressPercentByKey.update { map -> map - mirrorKeys.toSet() }
                 _failedKeys.update { keys -> keys + mirrorKeys.toSet() }
             }
@@ -114,13 +150,185 @@ object AttachmentDownloadNotifier {
         clientMessageId: String? = null,
         mirrorAsFileAttachment: Boolean = false,
     ) {
-        val keys = if (mirrorAsFileAttachment) {
-            DownloadedFileRegistry.progressLookupKeys(messageId, fileIndex, clientMessageId)
-        } else {
-            DecryptedImageCache.progressLookupKeys(messageId, fileIndex, clientMessageId)
-        }.toSet()
+        val keys = lookupKeys(messageId, fileIndex, clientMessageId, mirrorAsFileAttachment).toSet()
         _progressPercentByKey.update { map -> map - keys }
         _failedKeys.update { failed -> failed - keys }
+        _cancelledKeys.update { cancelled -> cancelled - keys }
+        keys.forEach { ApiClient.markPartialDownloadUserDismissed(it, dismissed = false) }
+    }
+
+    /**
+     * Prepares a new download or resumes a paused partial. Clears stale data only when not resuming.
+     */
+    fun beginDownload(
+        messageId: Int,
+        fileIndex: Int,
+        clientMessageId: String? = null,
+        mirrorAsFileAttachment: Boolean = false,
+    ) {
+        val keys = lookupKeys(messageId, fileIndex, clientMessageId, mirrorAsFileAttachment)
+        val resuming = keys.any { ApiClient.hasResumablePartialOnDisk(it) }
+        _cancelledKeys.update { cancelled -> cancelled - keys.toSet() }
+        _failedKeys.update { failed -> failed - keys.toSet() }
+        if (resuming) {
+            val percent = keys.mapNotNull { ApiClient.loadPartialDownloadPercent(it) }.maxOrNull()
+                ?.coerceIn(1, 99)
+                ?: 1
+            applyProgressPercent(keys, percent)
+            keys.forEach {
+                ApiClient.markPartialDownloadPaused(it, paused = false)
+                ApiClient.markPartialDownloadUserDismissed(it, dismissed = false)
+            }
+        } else {
+            keys.forEach { ApiClient.clearPartialEncryptedDownload(it) }
+            applyProgressPercent(keys, 1)
+        }
+    }
+
+    /**
+     * Stops UI progress and marks the download paused. Partial encrypted bytes stay on disk for resume.
+     */
+    fun cancelDownload(
+        messageId: Int,
+        fileIndex: Int,
+        clientMessageId: String? = null,
+        mirrorAsFileAttachment: Boolean = false,
+    ) {
+        val keys = lookupKeys(messageId, fileIndex, clientMessageId, mirrorAsFileAttachment)
+        val percent = keys.mapNotNull { _progressPercentByKey.value[it] }.maxOrNull()
+            ?: keys.mapNotNull { ApiClient.loadPartialDownloadPercent(it) }.maxOrNull()
+            ?: 1
+        keys.forEach { key ->
+            ApiClient.savePartialDownloadProgress(key, percent)
+            ApiClient.markPartialDownloadUserDismissed(key, dismissed = true)
+        }
+        _progressPercentByKey.update { map -> map - keys.toSet() }
+        _failedKeys.update { failed -> failed - keys.toSet() }
+        _cancelledKeys.update { cancelled -> cancelled + keys.toSet() }
+    }
+
+    suspend fun restorePausedForAttachment(
+        messageId: Int,
+        fileIndex: Int,
+        clientMessageId: String? = null,
+        mirrorAsFileAttachment: Boolean = false,
+    ) {
+        val keys = lookupKeys(messageId, fileIndex, clientMessageId, mirrorAsFileAttachment)
+        keys.forEach { key ->
+            if (ApiClient.hasResumablePartialOnDisk(key)) {
+                ApiClient.anchorPartialDownloadMetaIfNeeded(key)
+            }
+        }
+        val resumable = keys.filter { ApiClient.hasResumablePartialOnDisk(it) }
+        if (resumable.isEmpty()) return
+
+        val percent = resumable.mapNotNull { ApiClient.loadPartialDownloadPercent(it) }.maxOrNull()
+            ?.coerceIn(1, 99)
+            ?: return
+        applyProgressPercent(keys, percent)
+
+        val dismissed = resumable.filter { ApiClient.isPartialDownloadUserDismissed(it) }
+        if (dismissed.isNotEmpty()) {
+            val activeDismissed = dismissed.filter { inFlightCheck(it) }.toSet()
+            _cancelledKeys.update { cancelled ->
+                (cancelled - dismissed.toSet()) + (dismissed.toSet() - activeDismissed)
+            }
+        }
+    }
+
+    suspend fun hydrateFromDisk() {
+        ApiClient.hydratePausedDownloadsFromDisk()
+        val dismissed = ApiClient.listResumablePartialDownloadKeys()
+            .filter { ApiClient.isPartialDownloadUserDismissed(it) }
+        if (dismissed.isNotEmpty()) {
+            _cancelledKeys.update { cancelled -> cancelled + dismissed.toSet() }
+        }
+    }
+
+    /** @deprecated Use [hydrateFromDisk] + [AttachmentTransferBootstrap.runColdStart]. */
+    suspend fun restoreAllPausedFromDisk() = hydrateFromDisk()
+
+    suspend fun resumeInterruptedDownloadsOnAppStart() {
+        val keys = ApiClient.listAutoResumablePartialDownloadKeys()
+        if (keys.isEmpty()) return
+        val currentUserId = ApiClient.user?.id
+        for (storageKey in keys.distinct()) {
+            val resolved = MessageCacheStore.findMessageForAttachmentStorageKey(storageKey) ?: continue
+            val message = resolved.message
+            val fileIndex = resolved.fileIndex
+            val file = message.files?.getOrNull(fileIndex) ?: continue
+            val envelope = message.dmEnvelope ?: continue
+            val clientMessageId = message.client_message_id?.trim()?.takeIf { it.isNotEmpty() }
+            val mirrorAsFile = storageKey.startsWith("file_")
+            if (mirrorAsFile) {
+                if (DecryptedFileCache.getCached(message.id, fileIndex, clientMessageId) != null) continue
+            } else {
+                if (DecryptedImageCache.getCached(message.id, fileIndex, clientMessageId) != null) continue
+            }
+            beginDownload(
+                messageId = message.id,
+                fileIndex = fileIndex,
+                clientMessageId = clientMessageId,
+                mirrorAsFileAttachment = mirrorAsFile,
+            )
+            resumeScope.launch {
+                runCatching {
+                    if (mirrorAsFile) {
+                        DmFileDownloader.downloadToCache(
+                            messageId = message.id,
+                            fileIndex = fileIndex,
+                            file = file,
+                            envelope = envelope,
+                            currentUserId = currentUserId,
+                            clientMessageId = clientMessageId,
+                        )
+                    } else {
+                        DecryptedImageCache.getOrDecrypt(
+                            messageId = message.id,
+                            fileIndex = fileIndex,
+                            file = file,
+                            envelope = envelope,
+                            currentUserId = currentUserId,
+                            clientMessageId = clientMessageId,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun isCancelled(storageKey: String): Boolean =
+        storageKey in _cancelledKeys.value || ApiClient.isPartialDownloadUserDismissed(storageKey)
+
+    fun isCancelled(
+        messageId: Int,
+        fileIndex: Int,
+        clientMessageId: String? = null,
+        mirrorAsFileAttachment: Boolean = false,
+    ): Boolean {
+        val keys = lookupKeys(messageId, fileIndex, clientMessageId, mirrorAsFileAttachment)
+        return keys.any { isCancelled(it) }
+    }
+
+    fun hasResumablePartial(
+        messageId: Int,
+        fileIndex: Int,
+        clientMessageId: String? = null,
+        mirrorAsFileAttachment: Boolean = false,
+    ): Boolean {
+        val keys = lookupKeys(messageId, fileIndex, clientMessageId, mirrorAsFileAttachment)
+        return keys.any { ApiClient.hasResumablePartialOnDisk(it) }
+    }
+
+    private fun lookupKeys(
+        messageId: Int,
+        fileIndex: Int,
+        clientMessageId: String? = null,
+        mirrorAsFileAttachment: Boolean = false,
+    ): List<String> = if (mirrorAsFileAttachment) {
+        DownloadedFileRegistry.progressLookupKeys(messageId, fileIndex, clientMessageId)
+    } else {
+        DecryptedImageCache.progressLookupKeys(messageId, fileIndex, clientMessageId)
     }
 
     fun isFailed(
@@ -129,11 +337,33 @@ object AttachmentDownloadNotifier {
         clientMessageId: String? = null,
         mirrorAsFileAttachment: Boolean = false,
     ): Boolean {
-        val keys = if (mirrorAsFileAttachment) {
-            DownloadedFileRegistry.progressLookupKeys(messageId, fileIndex, clientMessageId)
-        } else {
-            DecryptedImageCache.progressLookupKeys(messageId, fileIndex, clientMessageId)
-        }
+        val keys = lookupKeys(messageId, fileIndex, clientMessageId, mirrorAsFileAttachment)
         return keys.any { it in _failedKeys.value }
+    }
+
+    private fun mirrorKeysFor(
+        primaryKey: String,
+        messageId: Int,
+        fileIndex: Int,
+        clientMessageId: String?,
+        mirrorAsFileAttachment: Boolean,
+    ): List<String> = when {
+        mirrorAsFileAttachment || primaryKey.startsWith("file_") ->
+            DownloadedFileRegistry.progressLookupKeys(messageId, fileIndex, clientMessageId)
+        else ->
+            DecryptedImageCache.progressLookupKeys(messageId, fileIndex, clientMessageId)
+    }.ifEmpty { listOf(primaryKey) }
+
+    private fun applyProgressPercent(keys: List<String>, percent: Int) {
+        val pct = percent.coerceIn(1, 99)
+        val throttle = throttleFor(keys)
+        if (throttle.shouldPublishUi(pct)) {
+            _progressPercentByKey.update { map -> map + keys.associateWith { pct } }
+        }
+    }
+
+    private fun throttleFor(keys: List<String>): DownloadProgressThrottle {
+        val id = keys.firstOrNull() ?: return DownloadProgressThrottle()
+        return progressThrottleByKey.getOrPut(id) { DownloadProgressThrottle() }
     }
 }

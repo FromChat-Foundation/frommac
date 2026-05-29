@@ -56,6 +56,10 @@ actual fun rememberCreateDownloadDestinationLauncher(
     return remember(onDestination) { launcher }
 }
 
+actual suspend fun persistExportUriPermissionIfNeeded(exportUri: String) {
+    // iOS export URIs are file URLs; no persistable permission grant.
+}
+
 private fun defaultDownloadsDirectoryUrl(): NSURL? {
     val manager = NSFileManager.defaultManager
     return manager.URLForDirectory(

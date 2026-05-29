@@ -1,0 +1,25 @@
+package ru.fromchat
+
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import ru.fromchat.api.ApiClient
+import ru.fromchat.api.AttachmentTransferBootstrap
+
+/**
+ * iOS cold start (call from [iOSApp] Swift `init`, not from UIViewController lifecycle).
+ */
+object IosApplicationBootstrap {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var started = false
+
+    fun launchOnApplicationStart() {
+        if (started) return
+        started = true
+        scope.launch {
+            runCatching { ApiClient.loadPersistedData() }
+            runCatching { AttachmentTransferBootstrap.runColdStart() }
+        }
+    }
+}

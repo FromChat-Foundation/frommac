@@ -18,13 +18,8 @@ import io.ktor.client.plugins.websocket.pingInterval
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
-import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
-import io.ktor.http.contentLength
-import io.ktor.utils.io.core.isEmpty
-import io.ktor.utils.io.core.readBytes
-import io.ktor.utils.io.readRemaining
 import com.pr0gramm3r101.utils.files.PlatformFileSystem
 import io.ktor.client.request.patch
 import io.ktor.client.request.parameter
@@ -586,105 +581,97 @@ object ApiClient {
         else -> "${Config.apiBaseUrl}$path"
     }
 
-    suspend fun fetchEncryptedFile(path: String): ByteArray =
-        fetchEncryptedFileResumable(path, resumeKey = null, onProgress = null)
+    /** Encrypted ciphertext stored on disk after a resumable download. */
+    data class EncryptedFileOnDisk(
+        val path: String,
+        val sizeBytes: Long,
+    )
 
     /**
-     * Downloads encrypted file bytes with optional resume ([resumeKey] partial on disk) and progress.
+     * Downloads encrypted ciphertext to disk with optional resume ([resumeKey] partial on disk) and progress.
      */
     suspend fun fetchEncryptedFileResumable(
         path: String,
         resumeKey: String?,
         onProgress: ((percent: Int) -> Unit)?,
-    ): ByteArray {
+    ): EncryptedFileOnDisk {
+        resumeKey?.let { anchorPartialDownloadMetaIfNeeded(it) }
         val url = encryptedFileUrl(path)
-        val partialPath = resumeKey?.let { partialEncryptedDownloadPath(it) }
-        val prefix = partialPath?.let { readPartialEncryptedBytes(it) } ?: ByteArray(0)
-        val offset = prefix.size
-
-        onProgress?.invoke(if (offset > 0) percentForBytes(offset, offset.coerceAtLeast(1)) else 1)
-
-        val response = http.get(url) {
-            if (offset > 0) {
-                header(HttpHeaders.Range, "bytes=$offset-")
-            }
+        val outputPath = resumeKey?.let { partialEncryptedDownloadPath(it) }
+            ?: oneOffEncryptedDownloadPath()
+            ?: error("Encrypted downloads directory unavailable")
+        val offset = if (PlatformFileSystem.exists(outputPath)) {
+            PlatformFileSystem.fileSize(outputPath)
+        } else {
+            0L
         }
 
-        return when (response.status) {
-            HttpStatusCode.PartialContent -> {
-                readDownloadBody(
-                    response = response,
-                    prefix = prefix,
-                    partialPath = partialPath,
-                    onProgress = onProgress,
-                )
-            }
-            HttpStatusCode.OK -> {
-                if (offset > 0) {
-                    partialPath?.let { PlatformFileSystem.delete(it) }
+        val resumePercent = if (offset > 0L) {
+            resumeKey?.let { loadPartialDownloadPercent(it) }
+                ?: percentForBytes(offset, offset.coerceAtLeast(1L))
+        } else {
+            1
+        }
+        var lastReportedPercent = -1
+        fun reportProgress(percent: Int) {
+            val pct = percent.coerceIn(0, 100)
+            if (pct == lastReportedPercent && pct !in setOf(0, 100)) return
+            lastReportedPercent = pct
+            onProgress?.invoke(pct)
+        }
+
+        reportProgress(resumePercent.coerceIn(1, 99))
+
+        var expectedTotalBytes: Long? = null
+        val received = streamEncryptedFileToDisk(
+            url = url,
+            outputPath = outputPath,
+            rangeOffset = offset,
+            bearerToken = token,
+            userAgent = currentDownloadUserAgent(),
+            onChunkReceived = { receivedBytes, totalBytes ->
+                if (totalBytes != null && totalBytes > 0L) {
+                    expectedTotalBytes = totalBytes
                 }
-                readDownloadBody(
-                    response = response,
-                    prefix = if (offset > 0) ByteArray(0) else prefix,
-                    partialPath = partialPath,
-                    onProgress = onProgress,
-                )
-            }
-            else -> {
-                val bytes = response.body<ByteArray>()
-                onProgress?.invoke(100)
-                partialPath?.let { PlatformFileSystem.delete(it) }
-                bytes
-            }
-        }
-    }
-
-    private suspend fun readDownloadBody(
-        response: HttpResponse,
-        prefix: ByteArray,
-        partialPath: String?,
-        onProgress: ((percent: Int) -> Unit)?,
-    ): ByteArray {
-        val channel = response.bodyAsChannel()
-        var buffer = prefix
-        var received = prefix.size
-        val totalBytes = responseTotalBytes(response, received)
-
-        while (!channel.isClosedForRead) {
-            val packet = channel.readRemaining(16 * 1024)
-            if (packet.isEmpty) break
-            val chunk = packet.readBytes()
-            if (chunk.isEmpty()) continue
-            buffer = buffer + chunk
-            received += chunk.size
-            partialPath?.let { PlatformFileSystem.writeBytes(it, buffer) }
-            onProgress?.invoke(
-                if (totalBytes != null && totalBytes > 0) {
-                    percentForBytes(received, totalBytes)
+                val percent = if (totalBytes != null && totalBytes > 0L) {
+                    percentForBytes(receivedBytes, totalBytes)
                 } else {
-                    (received / 32_768).coerceIn(1, 99)
-                },
-            )
-        }
+                    (receivedBytes / 32_768L).toInt().coerceIn(1, 99)
+                }
+                resumeKey?.let {
+                    savePartialDownloadProgress(
+                        it,
+                        percent,
+                        totalBytes?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt(),
+                    )
+                }
+                reportProgress(percent)
+            },
+        )
 
-        onProgress?.invoke(100)
-        partialPath?.let { PlatformFileSystem.delete(it) }
-        return buffer
+        expectedTotalBytes?.let { total ->
+            if (total > 0L && received < total) {
+                error("Encrypted download incomplete ($received of $total bytes): $path")
+            }
+        }
+        reportProgress(99)
+        resumeKey?.let { clearPartialDownloadMeta(it) }
+        return EncryptedFileOnDisk(outputPath, received)
     }
 
-    private fun responseTotalBytes(response: HttpResponse, receivedSoFar: Int): Int? {
-        val contentRange = response.headers[HttpHeaders.ContentRange]
-        if (contentRange != null) {
-            val total = contentRange.substringAfterLast('/').toLongOrNull()
-            if (total != null && total > 0L) return total.toInt()
-        }
-        val contentLength = response.contentLength()?.toInt()
-        return when {
-            response.status == HttpStatusCode.PartialContent && contentLength != null ->
-                receivedSoFar + contentLength
-            contentLength != null && contentLength > 0 -> contentLength
-            else -> null
-        }
+    private fun currentDownloadUserAgent(): String? {
+        val currentDevice = currentDeviceInfo()
+        return buildLoginUserAgent(
+            osName = currentDevice.osName?.takeIf { it.isNotBlank() },
+            osVersion = currentDevice.osVersion?.takeIf { it.isNotBlank() },
+            model = currentDevice.model?.takeIf { it.isNotBlank() },
+            brand = currentDevice.brand?.takeIf { it.isNotBlank() },
+        )
+    }
+
+    private fun oneOffEncryptedDownloadPath(): String? {
+        val dir = encryptedDownloadsDir() ?: return null
+        return "$dir/once_${kotlin.random.Random.nextLong()}.enc"
     }
 
     /** Drops a partial encrypted download so the next attempt starts clean. */
@@ -692,26 +679,315 @@ object ApiClient {
         partialEncryptedDownloadPath(resumeKey)?.let { path ->
             runCatching { PlatformFileSystem.delete(path) }
         }
+        clearPartialDownloadMeta(resumeKey)
     }
 
-    private fun partialEncryptedDownloadPath(resumeKey: String): String? {
+    fun hasPartialEncryptedDownload(resumeKey: String): Boolean {
+        val path = partialEncryptedDownloadPath(resumeKey) ?: return false
+        return PlatformFileSystem.exists(path)
+    }
+
+    /** True when encrypted partial bytes exist on disk and can be resumed (cancel or abrupt kill). */
+    fun hasResumablePartialOnDisk(resumeKey: String): Boolean =
+        hasPartialEncryptedDownload(resumeKey)
+
+    fun loadPartialDownloadPercent(resumeKey: String): Int? =
+        partialDownloadMetaCache[resumeKey]?.percent
+
+    fun isPartialDownloadPaused(resumeKey: String): Boolean =
+        partialDownloadMetaCache[resumeKey]?.paused == true
+
+    fun isPartialDownloadUserDismissed(resumeKey: String): Boolean =
+        partialDownloadMetaCache[resumeKey]?.userDismissed == true
+
+    fun markPartialDownloadUserDismissed(resumeKey: String, dismissed: Boolean) {
+        val existing = partialDownloadMetaCache[resumeKey]
+        val percent = existing?.percent
+            ?: loadPartialDownloadPercent(resumeKey)
+            ?: 1
+        val meta = PartialDownloadMeta(
+            resumeKey = resumeKey,
+            percent = percent,
+            totalBytes = existing?.totalBytes,
+            paused = dismissed || existing?.paused == true,
+            userDismissed = dismissed,
+        )
+        partialDownloadMetaCache[resumeKey] = meta
+        writePartialDownloadMetaToDisk(meta)
+        val index = pausedDownloadIndexCache.toMutableSet()
+        if (dismissed || hasResumablePartialOnDisk(resumeKey)) {
+            index.add(resumeKey)
+        } else {
+            index.remove(resumeKey)
+        }
+        pausedDownloadIndexCache = index
+        writePausedDownloadIndexToDisk(index)
+    }
+
+    fun savePartialDownloadProgress(
+        resumeKey: String,
+        percent: Int,
+        totalBytes: Int? = null,
+    ) {
+        val existing = partialDownloadMetaCache[resumeKey]
+        val pct = percent.coerceIn(1, 99)
+        val total = totalBytes ?: existing?.totalBytes
+        if (existing != null && existing.percent == pct && existing.totalBytes == total && !existing.paused) {
+            return
+        }
+        val meta = PartialDownloadMeta(
+            resumeKey = resumeKey,
+            percent = pct,
+            totalBytes = total,
+            paused = existing?.paused == true,
+            userDismissed = existing?.userDismissed == true,
+        )
+        partialDownloadMetaCache[resumeKey] = meta
+        writePartialDownloadMetaToDisk(meta)
+    }
+
+    fun markPartialDownloadPaused(resumeKey: String, paused: Boolean) {
+        val existing = partialDownloadMetaCache[resumeKey]
+        val percent = existing?.percent ?: 1
+        val meta = PartialDownloadMeta(
+            resumeKey = resumeKey,
+            percent = percent,
+            totalBytes = existing?.totalBytes,
+            paused = paused,
+            userDismissed = existing?.userDismissed == true,
+        )
+        partialDownloadMetaCache[resumeKey] = meta
+        writePartialDownloadMetaToDisk(meta)
+        val index = pausedDownloadIndexCache.toMutableSet()
+        if (paused || meta.userDismissed) {
+            index.add(resumeKey)
+        } else {
+            index.remove(resumeKey)
+        }
+        pausedDownloadIndexCache = index
+        writePausedDownloadIndexToDisk(index)
+    }
+
+    /** Loads partial download metadata from disk (survives abrupt process death). */
+    suspend fun hydratePausedDownloadsFromDisk() {
+        val dir = encryptedDownloadsDir() ?: return
+        partialDownloadMetaCache.clear()
+        val resumableKeys = linkedSetOf<String>()
+
+        for (name in PlatformFileSystem.listFileNamesInDirectory(dir)) {
+            if (!name.endsWith(".meta")) continue
+            val meta = readPartialDownloadMetaFileFromDisk("$dir/$name") ?: continue
+            if (!hasPartialEncryptedDownload(meta.resumeKey)) {
+                clearPartialDownloadMeta(meta.resumeKey)
+                continue
+            }
+            val interrupted = if (meta.userDismissed) {
+                meta
+            } else {
+                meta.copy(paused = true)
+            }
+            partialDownloadMetaCache[meta.resumeKey] = interrupted
+            writePartialDownloadMetaToDisk(interrupted)
+            resumableKeys.add(meta.resumeKey)
+        }
+
+        for (name in PlatformFileSystem.listFileNamesInDirectory(dir)) {
+            if (!name.startsWith("partial_") || !name.endsWith(".enc")) continue
+            val encPath = "$dir/$name"
+            val sizeBytes = PlatformFileSystem.fileSize(encPath)
+            if (sizeBytes <= 0L) {
+                runCatching { PlatformFileSystem.delete(encPath) }
+                continue
+            }
+            val safe = name.removePrefix("partial_").removeSuffix(".enc")
+            val resumeKey = partialDownloadMetaCache.entries.firstOrNull { entry ->
+                partialEncryptedDownloadPath(entry.key)?.substringAfterLast('/') == name
+            }?.key ?: recoverResumeKeyFromSafeName(safe, dir)
+            if (resumeKey == null) continue
+            if (resumeKey in resumableKeys) continue
+            val percent = (sizeBytes / 32_768L).toInt().coerceIn(1, 99)
+            val recovered = PartialDownloadMeta(
+                resumeKey = resumeKey,
+                percent = percent,
+                totalBytes = null,
+                paused = true,
+                userDismissed = false,
+            )
+            partialDownloadMetaCache[resumeKey] = recovered
+            writePartialDownloadMetaToDisk(recovered)
+            resumableKeys.add(resumeKey)
+        }
+
+        pausedDownloadIndexCache = resumableKeys
+        writePausedDownloadIndexToDisk(resumableKeys)
+    }
+
+    suspend fun hydratePartialMetaIfNeeded(resumeKey: String) {
+        if (partialDownloadMetaCache.containsKey(resumeKey)) return
+        readPartialDownloadMetaFromDisk(resumeKey)?.let { partialDownloadMetaCache[resumeKey] = it }
+    }
+
+    suspend fun anchorPartialDownloadMetaIfNeeded(resumeKey: String) {
+        hydratePartialMetaIfNeeded(resumeKey)
+        if (partialDownloadMetaCache.containsKey(resumeKey)) return
+        if (!hasPartialEncryptedDownload(resumeKey)) {
+            savePartialDownloadProgress(resumeKey, percent = 1, totalBytes = null)
+            return
+        }
+        val path = partialEncryptedDownloadPath(resumeKey) ?: return
+        val sizeBytes = PlatformFileSystem.fileSize(path)
+        if (sizeBytes <= 0L) return
+        val percent = (sizeBytes / 32_768L).toInt().coerceIn(1, 99)
+        val recovered = PartialDownloadMeta(
+            resumeKey = resumeKey,
+            percent = percent,
+            totalBytes = null,
+            paused = true,
+            userDismissed = false,
+        )
+        partialDownloadMetaCache[resumeKey] = recovered
+        writePartialDownloadMetaToDisk(recovered)
+        val index = pausedDownloadIndexCache.toMutableSet()
+        index.add(resumeKey)
+        pausedDownloadIndexCache = index
+        writePausedDownloadIndexToDisk(index)
+    }
+
+    /** All storage keys with a resumable partial on disk. */
+    fun listResumablePartialDownloadKeys(): List<String> =
+        pausedDownloadIndexCache.filter { hasResumablePartialOnDisk(it) }
+
+    fun listAutoResumablePartialDownloadKeys(): List<String> =
+        listResumablePartialDownloadKeys().filter { !isPartialDownloadUserDismissed(it) }
+
+    private suspend fun recoverResumeKeyFromSafeName(safe: String, dir: String): String? {
+        val metaName = "partial_$safe.meta"
+        if (!PlatformFileSystem.listFileNamesInDirectory(dir).contains(metaName)) return null
+        return readPartialDownloadMetaFileFromDisk("$dir/$metaName")?.resumeKey
+    }
+
+    private data class PartialDownloadMeta(
+        val resumeKey: String,
+        val percent: Int,
+        val totalBytes: Int?,
+        val paused: Boolean,
+        /** User tapped cancel; keep partial + meta but do not auto-resume on next app start. */
+        val userDismissed: Boolean = false,
+    )
+
+    private val partialDownloadMetaCache = mutableMapOf<String, PartialDownloadMeta>()
+    private var pausedDownloadIndexCache: Set<String> = emptySet()
+
+    private suspend fun readPartialDownloadMetaFromDisk(resumeKey: String): PartialDownloadMeta? {
+        val path = partialDownloadMetaPath(resumeKey) ?: return null
+        return readPartialDownloadMetaFileFromDisk(path)
+    }
+
+    private suspend fun readPartialDownloadMetaFileFromDisk(path: String): PartialDownloadMeta? {
+        if (!PlatformFileSystem.exists(path)) return null
+        val text = runCatching {
+            ru.fromchat.core.cache.readOutboundFileBytes("file://$path").decodeToString()
+        }.getOrNull() ?: return null
+        return parsePartialDownloadMeta(text)
+    }
+
+    private fun parsePartialDownloadMeta(text: String): PartialDownloadMeta? {
+        var key: String? = null
+        var percent: Int? = null
+        var total: Int? = null
+        var paused = false
+        var userDismissed = false
+        for (line in text.lineSequence()) {
+            when {
+                line.startsWith("key=") -> key = line.removePrefix("key=").trim()
+                line.startsWith("percent=") -> percent = line.removePrefix("percent=").trim().toIntOrNull()
+                line.startsWith("total=") -> total = line.removePrefix("total=").trim().toIntOrNull()
+                line.startsWith("paused=1") -> paused = true
+                line.startsWith("dismissed=1") -> userDismissed = true
+            }
+        }
+        val resumeKey = key?.takeIf { it.isNotEmpty() } ?: return null
+        val pct = percent?.coerceIn(1, 99) ?: return null
+        return PartialDownloadMeta(resumeKey, pct, total, paused, userDismissed)
+    }
+
+    private fun writePartialDownloadMetaToDisk(meta: PartialDownloadMeta) {
+        val path = partialDownloadMetaPath(meta.resumeKey) ?: return
+        val lines = buildList {
+            add("key=${meta.resumeKey}")
+            add("percent=${meta.percent.coerceIn(1, 99)}")
+            meta.totalBytes?.let { add("total=$it") }
+            if (meta.paused) add("paused=1")
+            if (meta.userDismissed) add("dismissed=1")
+        }
+        runCatching {
+            PlatformFileSystem.writeBytes(path, lines.joinToString("\n").encodeToByteArray())
+        }
+    }
+
+    private fun clearPartialDownloadMeta(resumeKey: String) {
+        partialDownloadMetaCache.remove(resumeKey)
+        partialDownloadMetaPath(resumeKey)?.let { path ->
+            runCatching { PlatformFileSystem.delete(path) }
+        }
+        val index = pausedDownloadIndexCache.toMutableSet()
+        if (index.remove(resumeKey)) {
+            pausedDownloadIndexCache = index
+            writePausedDownloadIndexToDisk(index)
+        }
+    }
+
+    private fun pausedDownloadIndexPath(): String? {
+        val dir = encryptedDownloadsDir() ?: return null
+        return "$dir/paused_keys.txt"
+    }
+
+    private suspend fun readPausedDownloadIndexFromDisk(): Set<String> {
+        val path = pausedDownloadIndexPath() ?: return emptySet()
+        if (!PlatformFileSystem.exists(path)) return emptySet()
+        return runCatching {
+            ru.fromchat.core.cache.readOutboundFileBytes("file://$path")
+                .decodeToString()
+                .lineSequence()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .toSet()
+        }.getOrElse { emptySet() }
+    }
+
+    private fun writePausedDownloadIndexToDisk(keys: Set<String>) {
+        val path = pausedDownloadIndexPath() ?: return
+        if (keys.isEmpty()) {
+            runCatching { PlatformFileSystem.delete(path) }
+            return
+        }
+        runCatching {
+            PlatformFileSystem.writeBytes(path, keys.joinToString("\n").encodeToByteArray())
+        }
+    }
+
+    private fun encryptedDownloadsDir(): String? {
         val base = PlatformFileSystem.getAppCacheDirectory()
         if (base.isEmpty()) return null
         val dir = "$base/encrypted_downloads"
         PlatformFileSystem.ensureDirectory(dir)
+        return dir
+    }
+
+    private fun partialEncryptedDownloadPath(resumeKey: String): String? {
+        val dir = encryptedDownloadsDir() ?: return null
         val safe = resumeKey.replace(Regex("[^a-zA-Z0-9._-]"), "_")
         return "$dir/partial_$safe.enc"
     }
 
-    private suspend fun readPartialEncryptedBytes(path: String): ByteArray? {
-        if (!PlatformFileSystem.exists(path)) return null
-        return runCatching {
-            ru.fromchat.core.cache.readOutboundFileBytes("file://$path")
-        }.getOrNull()?.takeIf { it.isNotEmpty() }
+    private fun partialDownloadMetaPath(resumeKey: String): String? {
+        val dir = encryptedDownloadsDir() ?: return null
+        val safe = resumeKey.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+        return "$dir/partial_$safe.meta"
     }
 
-    private fun percentForBytes(received: Int, total: Int): Int {
-        if (received <= 0 || total <= 0) return 0
+    private fun percentForBytes(received: Long, total: Long): Int {
+        if (received <= 0L || total <= 0L) return 0
         val raw = ((received.toDouble() / total.toDouble()) * 100.0).toInt()
         return when {
             raw <= 0 -> 1

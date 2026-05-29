@@ -12,6 +12,17 @@ internal actual fun expectWriteBytes(path: String, bytes: ByteArray) {
     file.writeBytes(bytes)
 }
 
+internal actual fun expectAppendBytes(path: String, bytes: ByteArray) {
+    val file = File(path)
+    file.parentFile?.mkdirs()
+    file.appendBytes(bytes)
+}
+
+internal actual fun expectFileSize(path: String): Long {
+    val file = File(path)
+    return if (file.isFile) file.length() else 0L
+}
+
 internal actual fun expectDelete(path: String) {
     File(path).delete()
 }
@@ -24,6 +35,12 @@ internal actual fun expectDeleteFilesWithPrefix(dirPath: String, namePrefix: Str
             file.delete()
         }
     }
+}
+
+internal actual fun expectListFileNamesInDirectory(dirPath: String): List<String> {
+    val dir = File(dirPath)
+    if (!dir.isDirectory) return emptyList()
+    return dir.listFiles()?.map { it.name } ?: emptyList()
 }
 
 internal actual fun expectGetAppCacheDirectory(): String =

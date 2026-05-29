@@ -159,6 +159,8 @@ data class Message(
     val uploadJobId: String? = null,
     /** For optimistic UI: 0-100 upload progress, null when complete. */
     val uploadProgress: Int? = null,
+    /** Set when outbound upload failed; use [UPLOAD_ERROR_FILE_TOO_LARGE] for localized copy. */
+    @kotlinx.serialization.Transient val uploadError: String? = null,
     /** For DM file decryption; not serialized over network. */
     @kotlinx.serialization.Transient val dmEnvelope: DmEnvelope? = null,
     /** Blurhashes for image files (by index); from decrypted message JSON. */

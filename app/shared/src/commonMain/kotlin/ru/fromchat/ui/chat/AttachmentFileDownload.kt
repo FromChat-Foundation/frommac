@@ -10,3 +10,6 @@ import androidx.compose.runtime.Composable
 expect fun rememberCreateDownloadDestinationLauncher(
     onDestination: (String?) -> Unit,
 ): (filename: String, mimeType: String) -> Unit
+
+/** Re-applies persistable URI permission for a stored SAF export URI (best-effort). */
+expect suspend fun persistExportUriPermissionIfNeeded(exportUri: String)

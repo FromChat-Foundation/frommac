@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="decrypted_files" path="decrypted_files/" />
+    <cache-path name="decrypted_images" path="decrypted_images/" />
+    <!-- Outbound upload staging (instance uploads/) -->
+    <cache-path name="fromchat" path="fromchat/" />
+</paths>

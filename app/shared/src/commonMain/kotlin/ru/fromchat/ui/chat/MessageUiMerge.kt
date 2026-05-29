@@ -59,6 +59,7 @@ internal fun mergeMessageUiFields(db: Message, panel: Message?): Message {
             panel.pendingFileAspectRatio ?: db.pendingFileAspectRatio
         },
         uploadProgress = if (confirmed) null else panel.uploadProgress ?: db.uploadProgress,
+        uploadError = if (confirmed) null else panel.uploadError ?: db.uploadError,
         files = db.files ?: panel.files,
         dmEnvelope = db.dmEnvelope ?: panel.dmEnvelope,
         fileThumbnails = db.fileThumbnails ?: panel.fileThumbnails,

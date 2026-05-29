@@ -113,6 +113,7 @@ object OutgoingMessageCoordinator {
         filename: String,
         optimisticMessage: Message,
         aspectRatio: Float? = null,
+        fileSizeBytes: Long = 0L,
     ) {
         val instanceId = CacheContext.requireActiveInstanceId()
         val conversationId = conversationIdForDm(recipientId)
@@ -134,7 +135,7 @@ object OutgoingMessageCoordinator {
                     replyToId = replyToId,
                     fileUri = fileUri,
                     filename = filename,
-                    fileSizeBytes = 0L,
+                    fileSizeBytes = fileSizeBytes.coerceAtLeast(0L),
                     aspectRatio = aspectRatio?.takeIf { it > 0f },
                 ),
             )
@@ -176,6 +177,16 @@ object OutgoingMessageCoordinator {
                     "error" to (error.message ?: "unknown"),
                 )
             }
+    }
+
+    /** Re-queues a failed attachment upload (outbox row must still exist). */
+    fun retryDmAttachmentUpload(clientMessageId: String) {
+        val cid = clientMessageId.trim()
+        if (cid.isEmpty()) return
+        val instanceId = CacheContext.activeInstanceId.value.trim()
+        if (instanceId.isEmpty()) return
+        AttachmentMediaLog.upload("retry_requested", "job" to cid)
+        kickOutboxDrain(instanceId)
     }
 
     /** Drops a queued outbound row, local message, and any upload artifacts. */

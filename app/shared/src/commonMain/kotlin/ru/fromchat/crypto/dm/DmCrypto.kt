@@ -31,4 +31,12 @@ expect object DmCrypto {
 
     /** AES-GCM decrypt downloaded file bytes (ciphertext + tag; IV from [ivB64]). */
     suspend fun decryptAesGcm(ivB64: String, ciphertext: ByteArray, mek: ByteArray): ByteArray
+
+    /** AES-GCM decrypt from an on-disk ciphertext file into [outputPath] without loading the whole blob. */
+    suspend fun decryptAesGcmFileToPath(
+        ivB64: String,
+        encryptedFilePath: String,
+        mek: ByteArray,
+        outputPath: String,
+    ): Long
 }

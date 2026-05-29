@@ -1,8 +1,8 @@
 package ru.fromchat.ui.chat
 
 import com.pr0gramm3r101.utils.files.PlatformFileSystem
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -11,7 +11,7 @@ import ru.fromchat.api.DmEnvelope
 import ru.fromchat.api.DmFile
 import ru.fromchat.api.AttachmentDownloadNotifier
 import ru.fromchat.api.AttachmentDownloadProgress
-import ru.fromchat.crypto.decryptFile
+import ru.fromchat.crypto.decryptFileToPath
 
 /**
  * Disk + in-memory cache for decrypted DM images.
@@ -115,7 +115,7 @@ object DecryptedImageCache {
             ru.fromchat.core.cache.readOutboundFileBytes(sourceUri)
         }.getOrNull() ?: return
         if (bytes.isEmpty()) return
-        withContext(Dispatchers.Default + NonCancellable) {
+        withContext(Dispatchers.Default) {
             cacheMutex.withLock {
                 if (readDisk(idKey) == null) {
                     writeCacheLocked(idKey, bytes)
@@ -167,47 +167,58 @@ object DecryptedImageCache {
         cacheMutex.withLock { resolveUriLocked(key) }?.let { return it }
 
         val label = AttachmentMediaLog.messageLabel(messageLabel)
-        val uri = withContext(Dispatchers.Default + NonCancellable) {
+        AttachmentDownloadNotifier.beginDownload(
+            messageId = messageId,
+            fileIndex = fileIndex,
+            clientMessageId = clientMessageId,
+        )
+        val uri = withContext(Dispatchers.Default) {
             runCatching {
-                AttachmentDownloadScheduler.run(storageKey = key, messageId = messageId) {
+                AttachmentDownloadScheduler.run(
+                    storageKey = key,
+                    messageId = messageId,
+                    work = {
+                        AttachmentMediaLog.download(
+                            "decrypt_start",
+                            "key" to key,
+                            "file" to file.path,
+                            "msgId" to messageId,
+                            "visible" to AttachmentDownloadVisibility.isPrioritized(messageId),
+                            "msg" to label,
+                        )
+                        decryptAndPersist(
+                            key = key,
+                            messageId = messageId,
+                            fileIndex = fileIndex,
+                            clientMessageId = clientMessageId,
+                            file = file,
+                            envelope = envelope,
+                            currentUserId = currentUserId,
+                            messageLabel = label,
+                        )
+                    },
+                )
+            }.onFailure { error ->
+                if (error !is CancellationException) {
+                    ApiClient.clearPartialEncryptedDownload(key)
                     AttachmentMediaLog.download(
-                        "decrypt_start",
+                        "decrypt_exception",
                         "key" to key,
-                        "file" to file.path,
                         "msgId" to messageId,
-                        "visible" to AttachmentDownloadVisibility.isPrioritized(messageId),
                         "msg" to label,
+                        "err" to (error.message ?: error::class.simpleName),
                     )
-                    decryptAndPersist(
-                        key = key,
+                    AttachmentDownloadNotifier.emit(
+                        AttachmentDownloadProgress.Failed(
+                            storageKey = key,
+                            error = error.message ?: "decrypt_failed",
+                        ),
+                        messageLabel = label,
                         messageId = messageId,
                         fileIndex = fileIndex,
                         clientMessageId = clientMessageId,
-                        file = file,
-                        envelope = envelope,
-                        currentUserId = currentUserId,
-                        messageLabel = label,
                     )
                 }
-            }.onFailure { error ->
-                ApiClient.clearPartialEncryptedDownload(key)
-                AttachmentMediaLog.download(
-                    "decrypt_exception",
-                    "key" to key,
-                    "msgId" to messageId,
-                    "msg" to label,
-                    "err" to (error.message ?: error::class.simpleName),
-                )
-                AttachmentDownloadNotifier.emit(
-                    AttachmentDownloadProgress.Failed(
-                        storageKey = key,
-                        error = error.message ?: "decrypt_failed",
-                    ),
-                    messageLabel = label,
-                    messageId = messageId,
-                    fileIndex = fileIndex,
-                    clientMessageId = clientMessageId,
-                )
             }.getOrNull()
         }
         if (uri != null && messageId > 0) {
@@ -263,7 +274,7 @@ object DecryptedImageCache {
         fileIndex: Int,
         localFileUri: String,
         clientMessageId: String? = null,
-    ): String? = withContext(Dispatchers.Default + NonCancellable) {
+    ): String? = withContext(Dispatchers.Default) {
         val key = storageKey(messageId, fileIndex, clientMessageId)
         cacheMutex.withLock { resolveUriLocked(key) }?.let { existing ->
             AttachmentMediaLog.diskCache(
@@ -304,6 +315,7 @@ object DecryptedImageCache {
         currentUserId: Int?,
         messageLabel: String? = null,
     ): String? {
+        ensureAttachmentDownloadActive(key)
         cacheMutex.withLock { resolveUriLocked(key) }?.let { return it }
         AttachmentDownloadNotifier.emit(
             AttachmentDownloadProgress.InProgress(key, 1),
@@ -313,13 +325,27 @@ object DecryptedImageCache {
             clientMessageId = clientMessageId,
         )
         val t0 = AttachmentMediaLog.nowMs()
-        val bytes = runCatching {
-            decryptFile(
+        val outputPath = diskPath(key)
+        if (outputPath == null) {
+            ApiClient.clearPartialEncryptedDownload(key)
+            AttachmentDownloadNotifier.emit(
+                AttachmentDownloadProgress.Failed(key, "cache_write_failed"),
+                messageLabel = messageLabel,
+                messageId = messageId,
+                fileIndex = fileIndex,
+                clientMessageId = clientMessageId,
+            )
+            return null
+        }
+        val decryptedSize = runCatching {
+            decryptFileToPath(
                 file = file,
                 envelope = envelope,
                 currentUserId = currentUserId,
+                outputPath = outputPath,
                 downloadResumeKey = key,
                 onDownloadProgress = { percent ->
+                    checkAttachmentDownloadActive(key)
                     AttachmentDownloadNotifier.emit(
                         AttachmentDownloadProgress.InProgress(key, percent.coerceIn(0, 100)),
                         messageLabel = messageLabel,
@@ -330,6 +356,9 @@ object DecryptedImageCache {
                 },
             )
         }.onFailure { error ->
+            if (error is CancellationException) {
+                throw error
+            }
             ApiClient.clearPartialEncryptedDownload(key)
             AttachmentMediaLog.download(
                 "decrypt_failed",
@@ -347,10 +376,11 @@ object DecryptedImageCache {
                 clientMessageId = clientMessageId,
             )
         }.getOrNull()
-        if (bytes == null) {
+        if (decryptedSize == null) {
             ApiClient.clearPartialEncryptedDownload(key)
             return null
         }
+        ensureAttachmentDownloadActive(key)
         AttachmentDownloadNotifier.emit(
             AttachmentDownloadProgress.InProgress(key, 99),
             messageLabel = messageLabel,
@@ -358,8 +388,9 @@ object DecryptedImageCache {
             fileIndex = fileIndex,
             clientMessageId = clientMessageId,
         )
+        ApiClient.clearPartialEncryptedDownload(key)
         val uri = cacheMutex.withLock {
-            resolveUriLocked(key) ?: writeCacheLocked(key, bytes)
+            resolveUriLocked(key) ?: commitCachePathLocked(key, outputPath)
         }
         if (uri == null) {
             ApiClient.clearPartialEncryptedDownload(key)
@@ -367,7 +398,7 @@ object DecryptedImageCache {
                 "decrypt_persist_failed",
                 "key" to key,
                 "msg" to messageLabel,
-                "bytes" to bytes.size,
+                "bytes" to decryptedSize,
             )
             AttachmentDownloadNotifier.emit(
                 AttachmentDownloadProgress.Failed(key, "cache_write_failed"),
@@ -381,7 +412,7 @@ object DecryptedImageCache {
         AttachmentMediaLog.download(
             "decrypt_persist_ok",
             "key" to key,
-            "bytes" to bytes.size,
+            "bytes" to decryptedSize,
             "ms" to (AttachmentMediaLog.nowMs() - t0),
             "uri" to uri,
             "msg" to messageLabel,
@@ -451,6 +482,13 @@ object DecryptedImageCache {
             invalidatePath(path)
             null
         }
+    }
+
+    private fun commitCachePathLocked(storageKey: String, path: String): String? {
+        if (!PlatformFileSystem.exists(path)) return null
+        val uri = "file://$path"
+        memoryCache[storageKey] = uri
+        return uri
     }
 
     private fun invalidatePath(path: String) {

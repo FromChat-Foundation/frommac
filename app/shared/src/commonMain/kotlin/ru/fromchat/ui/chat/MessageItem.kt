@@ -54,8 +54,22 @@ import com.pr0gramm3r101.utils.conditional
 import org.jetbrains.compose.resources.stringResource
 import ru.fromchat.Res
 import ru.fromchat.api.Message
+import ru.fromchat.api.isQueuedOutbound
 import ru.fromchat.api.formatMessageTimeLocal
 import ru.fromchat.*
+
+/** True when [Message.content] is only a filename placeholder (no real caption). */
+internal fun isFilenameOnlyMessageCaption(message: Message): Boolean {
+    val content = message.content.trim()
+    if (content.isEmpty()) return false
+    message.pendingFilename?.trim()?.takeIf { it.isNotEmpty() }?.let { pending ->
+        if (content == pending) return true
+    }
+    message.files.orEmpty().forEach { file ->
+        if (content == file.name.trim()) return true
+    }
+    return false
+}
 
 private fun isMessageCorrupted(message: Message): Boolean {
     val files = message.files ?: return false
@@ -85,7 +99,9 @@ fun MessageItem(
     isContextMenuForThisMessage: Boolean = false,
     sharedTransitionScope: SharedTransitionScope? = null,
     animatedVisibilityScope: AnimatedVisibilityScope? = null,
-    sharedAvatarNavKey: String? = null
+    sharedAvatarNavKey: String? = null,
+    onCancelOutboundAttachment: ((Message) -> Unit)? = null,
+    onRetryOutboundAttachment: ((Message) -> Unit)? = null,
 ) {
     // Cache derived values per message to avoid recomputing in every recomposition.
     val isCorrupted = remember(message.files, message.fileThumbnails, message.dmEnvelope) {
@@ -205,6 +221,21 @@ fun MessageItem(
                 val pendingHasOutboundFile = message.pendingFileUri != null &&
                     message.files.isNullOrEmpty() &&
                     !pendingIsImage
+                val uploadFailed = !message.uploadError.isNullOrBlank()
+                val canCancelUpload = message.isQueuedOutbound() && isAuthor &&
+                    !uploadFailed &&
+                    (pendingIsImage || pendingHasOutboundFile) &&
+                    (message.uploadProgress != null || message.pendingFileUri != null)
+                val onCancelUpload: (() -> Unit)? = if (canCancelUpload && onCancelOutboundAttachment != null) {
+                    { onCancelOutboundAttachment.invoke(message) }
+                } else {
+                    null
+                }
+                val onRetryUpload: (() -> Unit)? = if (uploadFailed && onRetryOutboundAttachment != null) {
+                    { onRetryOutboundAttachment.invoke(message) }
+                } else {
+                    null
+                }
                 val firstContentIsImage = (
                     !showUsername || isAuthor
                 ) && message.reply_to == null && (
@@ -428,6 +459,7 @@ fun MessageItem(
                                 val awaitingServer = message.id < 0 && message.files.isNullOrEmpty()
                                 val isOutboundPendingImage = awaitingServer && pendingIsImage
                                 val awaitingServerAck = isOutboundPendingImage &&
+                                    !uploadFailed &&
                                     message.uploadProgress == null
                                 AttachmentPreview(
                                     file = primaryFile,
@@ -435,9 +467,11 @@ fun MessageItem(
                                     currentUserId = currentUserId,
                                     pendingFileUri = message.pendingFileUri,
                                     pendingFilename = message.pendingFilename,
-                                    isUploading = isOutboundPendingImage,
+                                    isUploading = isOutboundPendingImage && !uploadFailed,
                                     awaitingServerAck = awaitingServerAck,
                                     uploadProgress = message.uploadProgress,
+                                    uploadError = message.uploadError,
+                                    onRetryUpload = onRetryUpload,
                                     fileThumbnail = message.fileThumbnails?.firstOrNull()?.takeIf { it.isNotBlank() },
                                     fileAspectRatio = imageAspectRatioForMessage(
                                         fileAspectRatios = message.fileAspectRatios,
@@ -464,6 +498,7 @@ fun MessageItem(
                                         !isImageClosing,
                                     isAuthor = isAuthor,
                                     messageLabel = message.content,
+                                    onCancelUpload = onCancelUpload,
                                     modifier = if (firstContentIsImage) {
                                         Modifier.padding(all = 2.dp)
                                     } else {
@@ -475,6 +510,7 @@ fun MessageItem(
                                 val awaitingServer = message.id < 0 && message.files.isNullOrEmpty()
                                 val isOutboundPendingFile = awaitingServer && pendingHasOutboundFile
                                 val awaitingServerAck = isOutboundPendingFile &&
+                                    !uploadFailed &&
                                     message.uploadProgress == null
                                 AttachmentPreview(
                                     file = primaryFile,
@@ -482,16 +518,19 @@ fun MessageItem(
                                     currentUserId = currentUserId,
                                     pendingFileUri = message.pendingFileUri,
                                     pendingFilename = message.pendingFilename,
-                                    isUploading = isOutboundPendingFile,
+                                    isUploading = isOutboundPendingFile && !uploadFailed,
                                     awaitingServerAck = awaitingServerAck,
                                     uploadProgress = message.uploadProgress,
+                                    uploadError = message.uploadError,
+                                    onRetryUpload = onRetryUpload,
                                     fileSizeBytes = message.fileSizes?.firstOrNull(),
                                     messageId = message.id,
                                     fileIndex = 0,
                                     clientMessageId = message.client_message_id,
                                     isAuthor = isAuthor,
                                     messageLabel = message.content,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                    onCancelUpload = onCancelUpload,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
                                 )
                             }
                             message.files?.forEachIndexed { index, file ->
@@ -532,22 +571,23 @@ fun MessageItem(
                                     isExpanded = isImage && expandedImageKey != null && expandedImageKey == imageKey && !isImageClosing,
                                     isAuthor = isAuthor,
                                     messageLabel = message.content,
+                                    onCancelUpload = onCancelUpload,
                                     modifier = if (isFirstImage && firstContentIsImage && isImage) {
                                         Modifier.padding(all = 2.dp)
                                     } else {
                                         Modifier.padding(
-                                            horizontal = if (isImage) 2.dp else 12.dp,
+                                            horizontal = if (isImage) 2.dp else 4.dp,
                                             vertical = if (isImage) 2.dp else 4.dp
                                         )
                                     }
                                 )
                             }
                         }
-                        val hideFilenamePlaceholderCaption = message.pendingFileUri != null &&
-                            message.files.isNullOrEmpty() &&
-                            message.pendingFilename != null &&
-                            message.content == message.pendingFilename
-                        if (message.content.isNotBlank() && !isCorrupted && !hideFilenamePlaceholderCaption) {
+                        if (
+                            message.content.isNotBlank() &&
+                            !isCorrupted &&
+                            !isFilenameOnlyMessageCaption(message)
+                        ) {
                             Text(
                                 text = message.content,
                                 style = MaterialTheme.typography.bodyMedium,

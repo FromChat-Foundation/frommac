@@ -22,6 +22,8 @@ fun mimeTypeForFilename(filename: String): String {
         "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         "ppt" -> "application/vnd.ms-powerpoint"
         "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        "apk", "apks", "xapk", "apkm" -> "application/vnd.android.package-archive"
+        "dmg" -> "application/x-apple-diskimage"
         else -> "application/octet-stream"
     }
 }

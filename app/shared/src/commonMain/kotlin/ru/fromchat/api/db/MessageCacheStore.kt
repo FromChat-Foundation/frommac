@@ -12,6 +12,7 @@ import ru.fromchat.api.DmConversation
 import ru.fromchat.api.Message
 import ru.fromchat.api.sortMessagesForChatDisplay
 import ru.fromchat.ui.chat.DecryptedImageCache
+import ru.fromchat.ui.chat.DownloadedFileRegistry
 import ru.fromchat.ui.chat.dedupeMessagesByClientId
 import ru.fromchat.ui.chat.dropSupersededOptimisticMessages
 import ru.fromchat.api.ProfileCache
@@ -472,6 +473,8 @@ object MessageCacheStore {
                     ?: msg.pendingFileAspectRatio,
                 uploadJobId = cid,
                 uploadProgress = percent,
+                fileSizes = msg.fileSizes
+                    ?: payload.fileSizeBytes.takeIf { it > 0L }?.let { listOf(it) },
             )
         }
     }
@@ -538,6 +541,7 @@ object MessageCacheStore {
                 ?: resolveLocalPreviewUri(base),
             pendingFilename = parsed.pendingFilename ?: base.pendingFilename,
             uploadJobId = parsed.uploadJobId ?: base.uploadJobId,
+            fileSizes = parsed.fileSizes ?: base.fileSizes,
             pendingFileAspectRatio = parsed.fileAspectRatios?.firstOrNull()
                 ?: parsed.fileDimensions?.firstOrNull()?.let { (w, h) ->
                     aspectRatioFromDimensionPair(w, h)
@@ -606,5 +610,70 @@ object MessageCacheStore {
                 .selectSentMessageIdByClientMessageId(iid, conversationId, cid)
                 .executeAsOneOrNull() != null
         }
+    }
+
+    data class AttachmentResumeTarget(
+        val message: Message,
+        val fileIndex: Int,
+    )
+
+    suspend fun findMessageForAttachmentStorageKey(storageKey: String): AttachmentResumeTarget? =
+        withContext(Dispatchers.Default) {
+            val key = storageKey.trim()
+            if (key.isEmpty()) return@withContext null
+            val iid = runCatching { instanceId() }.getOrNull() ?: return@withContext null
+            val fileIndex = when {
+                key.startsWith("file_") -> DownloadedFileRegistry.fileIndexFromStorageKey(key)
+                key.startsWith("img_") -> fileIndexFromImageStorageKey(key)
+                else -> null
+            } ?: return@withContext null
+
+            val messageId = when {
+                key.startsWith("file_") -> DownloadedFileRegistry.messageIdFromStorageKey(key)
+                key.startsWith("img_") -> DecryptedImageCache.messageIdFromStorageKey(key)
+                else -> null
+            }
+            if (messageId != null && messageId > 0) {
+                val row = db.messageDatabaseQueries
+                    .selectMessageByNumericId(iid, messageId.toLong())
+                    .executeAsOneOrNull()
+                val msg = row?.toAppMessage()
+                if (msg != null && !msg.files.isNullOrEmpty()) {
+                    return@withContext AttachmentResumeTarget(msg, fileIndex)
+                }
+            }
+
+            val rows = db.messageDatabaseQueries.selectMessagesForInstance(iid).executeAsList()
+            for (row in rows) {
+                val msg = row.toAppMessage()
+                if (msg.files.isNullOrEmpty()) continue
+                val lookupKeys = if (key.startsWith("file_")) {
+                    DownloadedFileRegistry.progressLookupKeys(
+                        messageId = msg.id,
+                        fileIndex = fileIndex,
+                        clientMessageId = msg.client_message_id,
+                    )
+                } else {
+                    DecryptedImageCache.progressLookupKeys(
+                        messageId = msg.id,
+                        fileIndex = fileIndex,
+                        clientMessageId = msg.client_message_id,
+                    )
+                }
+                if (key in lookupKeys) {
+                    return@withContext AttachmentResumeTarget(msg, fileIndex)
+                }
+            }
+            null
+        }
+
+    private fun fileIndexFromImageStorageKey(storageKey: String): Int? {
+        if (storageKey.startsWith("img_c_")) {
+            return storageKey.substringAfterLast('_').toIntOrNull()
+        }
+        if (storageKey.startsWith("img_")) {
+            return storageKey.substringAfterLast('_').toIntOrNull()
+        }
+        return null
     }
 }

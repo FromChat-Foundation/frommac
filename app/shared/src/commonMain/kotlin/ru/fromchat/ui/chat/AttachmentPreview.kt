@@ -1,6 +1,7 @@
 package ru.fromchat.ui.chat
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -48,6 +49,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.material3.TextButton
 import kotlinx.coroutines.Dispatchers
@@ -81,11 +83,16 @@ import org.jetbrains.compose.resources.stringResource
 import ru.fromchat.Res
 import ru.fromchat.api.ApiClient
 import ru.fromchat.api.AttachmentDownloadNotifier
+import ru.fromchat.ui.scaleOnPress
 import ru.fromchat.api.DmEnvelope
 import ru.fromchat.api.DmFile
 import ru.fromchat.attachment_image_load_failed
 import ru.fromchat.attachment_retry
+import ru.fromchat.attachment_upload_failed
+import ru.fromchat.attachment_upload_failed_too_large
 import ru.fromchat.cd_attachment_retry
+import ru.fromchat.cd_attachment_upload_retry
+import ru.fromchat.core.cache.UPLOAD_ERROR_FILE_TOO_LARGE
 
 private val IMAGE_SIZE = 160.dp
 private const val BLUR_FADE_MS = 450
@@ -108,6 +115,8 @@ fun AttachmentPreview(
     awaitingServerAck: Boolean = false,
     /** 0–100 upload progress when isUploading; null = indefinite */
     uploadProgress: Int? = null,
+    uploadError: String? = null,
+    onRetryUpload: (() -> Unit)? = null,
     fileThumbnail: String? = null,
     fileAspectRatio: Float? = null,
     fileSizeBytes: Long? = null,
@@ -120,7 +129,8 @@ fun AttachmentPreview(
     isAuthor: Boolean = false,
     /** Message text shown in attachment download/upload logs. */
     messageLabel: String? = null,
-    modifier: Modifier = Modifier
+    onCancelUpload: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
 ) {
     val isImage = when {
         file != null -> isImageFilename(file.name)
@@ -157,7 +167,10 @@ fun AttachmentPreview(
                 isAuthor = isAuthor,
                 isUploading = isPendingFile && (isUploading || awaitingServerAck),
                 uploadProgress = if (isPendingFile) uploadProgress else null,
+                uploadError = if (isPendingFile) uploadError else null,
+                onRetryUpload = if (isPendingFile) onRetryUpload else null,
                 messageLabel = messageLabel,
+                onCancelUpload = onCancelUpload,
                 modifier = modifier,
             )
         }
@@ -235,7 +248,10 @@ fun AttachmentPreview(
                             isUploading = isUploading,
                             awaitingServerAck = awaitingServerAck,
                             uploadProgress = uploadProgress,
+                            uploadError = uploadError,
+                            onRetryUpload = onRetryUpload,
                             messageLabel = messageLabel,
+                            onCancelUpload = onCancelUpload,
                             onFullyLoaded = { if (it) isFullyLoaded = true },
                         )
                     }
@@ -262,9 +278,13 @@ private fun ChatImageTileContent(
     isUploading: Boolean,
     awaitingServerAck: Boolean,
     uploadProgress: Int?,
+    uploadError: String? = null,
+    onRetryUpload: (() -> Unit)? = null,
     messageLabel: String? = null,
+    onCancelUpload: (() -> Unit)? = null,
     onFullyLoaded: (Boolean) -> Unit = {},
 ) {
+    val scope = rememberCoroutineScope()
     val clipShape = attachmentImageCornerShape(isAuthor)
     val cacheClientId = clientMessageId?.trim()?.takeIf { it.isNotEmpty() }
     val layoutAspect = aspectRatio?.takeIf { it.isFinite() && it > 0f }
@@ -314,6 +334,17 @@ private fun ChatImageTileContent(
     }
     val decryptFailed = remember(downloadProgressByKey, messageId, fileIndex, cacheClientId) {
         AttachmentDownloadNotifier.isFailed(messageId, fileIndex, cacheClientId)
+    }
+    val downloadCancelled = remember(downloadProgressByKey, messageId, fileIndex, cacheClientId) {
+        AttachmentDownloadNotifier.isCancelled(messageId, fileIndex, cacheClientId) ||
+            AttachmentDownloadNotifier.hasResumablePartial(messageId, fileIndex, cacheClientId)
+    }
+    LaunchedEffect(messageId, fileIndex, cacheClientId) {
+        AttachmentDownloadNotifier.restorePausedForAttachment(
+            messageId = messageId,
+            fileIndex = fileIndex,
+            clientMessageId = cacheClientId,
+        )
     }
     var isAwaitingNetworkFull by remember(decryptCacheKey) { mutableStateOf(false) }
     var loadAttempt by remember(decryptCacheKey) { mutableIntStateOf(0) }
@@ -565,8 +596,9 @@ private fun ChatImageTileContent(
 
     val isDownloadingFullImage = !isOutboundPending && fullBitmap == null &&
         (downloadProgress != null || isAwaitingNetworkFull)
-    val showDownloadProgressOverlay = isDownloadingFullImage && !showOutboundBlurOverlay
-    val showLoadFailedOverlay = decryptFailed && fullBitmap == null && !isOutboundPending
+    val showDownloadProgressOverlay = isDownloadingFullImage && !showOutboundBlurOverlay && !downloadCancelled
+    val showDownloadCancelledOverlay = downloadCancelled && fullBitmap == null && !isOutboundPending
+    val showLoadFailedOverlay = decryptFailed && fullBitmap == null && !isOutboundPending && !downloadCancelled
     val showSpinnerOnly = fullBitmap == null && thumbBitmap == null && !hasLocalSource &&
         !showLoadFailedOverlay &&
         !showOutboundBlurOverlay &&
@@ -634,19 +666,62 @@ private fun ChatImageTileContent(
                     )
                     LaunchedEffect(full) { onFullyLoaded(true) }
                 }
-                if (showDownloadProgressOverlay) {
+                AnimatedVisibility(
+                    visible = showDownloadProgressOverlay,
+                    enter = scaleIn(
+                        initialScale = 0.82f,
+                        animationSpec = tween(AttachmentLeadingTransitionMs, easing = FastOutSlowInEasing),
+                    ) + fadeIn(tween(AttachmentLeadingTransitionMs, easing = FastOutSlowInEasing)),
+                    exit = scaleOut(
+                        targetScale = 0.82f,
+                        animationSpec = tween(AttachmentLeadingTransitionMs, easing = FastOutSlowInEasing),
+                    ) + fadeOut(tween(AttachmentLeadingTransitionMs, easing = FastOutSlowInEasing)),
+                ) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.12f)),
                         contentAlignment = Alignment.Center,
                     ) {
-                        ExpressiveUploadIndicator(
-                            uploadProgress = downloadProgress,
+                        CancellableAttachmentProgressIndicator(
+                            progress = downloadProgress,
+                            onCancel = {
+                                scope.launch {
+                                    AttachmentDownloadNotifier.cancelDownload(
+                                        messageId = messageId,
+                                        fileIndex = fileIndex,
+                                        clientMessageId = cacheClientId,
+                                    )
+                                    AttachmentDownloadScheduler.cancel(decryptCacheKey)
+                                }
+                            },
+                            showCloseScrim = true,
                             modifier = Modifier.size(48.dp),
                         )
                     }
-                } else if (showSpinnerOnly) {
+                }
+                AnimatedVisibility(
+                    visible = showDownloadCancelledOverlay,
+                    enter = scaleIn(
+                        initialScale = 0.82f,
+                        animationSpec = tween(AttachmentLeadingTransitionMs, easing = FastOutSlowInEasing),
+                    ) + fadeIn(tween(AttachmentLeadingTransitionMs, easing = FastOutSlowInEasing)),
+                    exit = scaleOut(
+                        targetScale = 0.82f,
+                        animationSpec = tween(AttachmentLeadingTransitionMs, easing = FastOutSlowInEasing),
+                    ) + fadeOut(tween(AttachmentLeadingTransitionMs, easing = FastOutSlowInEasing)),
+                ) {
+                    DownloadCancelledImageOverlay(
+                        isAuthor = isAuthor,
+                        onRetryDownload = {
+                            AttachmentDownloadNotifier.beginDownload(messageId, fileIndex, cacheClientId)
+                            decryptFinished = false
+                            loadAttempt++
+                        },
+                        modifier = Modifier.matchParentSize(),
+                    )
+                }
+                if (showSpinnerOnly) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
@@ -658,7 +733,7 @@ private fun ChatImageTileContent(
                     AttachmentImageLoadFailedOverlay(
                         isAuthor = isAuthor,
                         onRetry = {
-                            AttachmentDownloadNotifier.clearProgress(messageId, fileIndex, cacheClientId)
+                            AttachmentDownloadNotifier.beginDownload(messageId, fileIndex, cacheClientId)
                             decryptFinished = false
                             ApiClient.clearPartialEncryptedDownload(decryptCacheKey)
                             loadAttempt++
@@ -674,10 +749,59 @@ private fun ChatImageTileContent(
                 uploadProgress = if (isUploading || awaitingServerAck) uploadProgress else null,
                 clipShape = clipShape,
                 contentScale = imageContentScale,
+                onCancelUpload = if (isUploading && !awaitingServerAck) onCancelUpload else null,
                 modifier = Modifier
                     .matchParentSize()
                     .alpha(outboundOverlayAlpha.value),
             )
+        }
+        if (isOutboundPending && !uploadError.isNullOrBlank() && onRetryUpload != null) {
+            AttachmentUploadFailedOverlay(
+                isAuthor = isAuthor,
+                errorKey = uploadError,
+                onRetry = onRetryUpload,
+                modifier = Modifier.matchParentSize(),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalHazeMaterialsApi::class)
+@Composable
+private fun DownloadCancelledImageOverlay(
+    isAuthor: Boolean,
+    onRetryDownload: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scrim = MaterialTheme.colorScheme.scrim.copy(alpha = 0.38f)
+    Box(
+        modifier = modifier
+            .hazeEffect(style = HazeMaterials.thin())
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.12f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = scrim,
+            modifier = Modifier
+                .size(48.dp)
+                .scaleOnPress(scale = 0.92f, onClick = onRetryDownload, indication = null),
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Download,
+                    contentDescription = null,
+                    modifier = Modifier.size(26.dp),
+                    tint = if (isAuthor) {
+                        Color.White
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                )
+            }
         }
     }
 }
@@ -689,6 +813,7 @@ private fun UploadingImageOverlay(
     uploadProgress: Int?,
     clipShape: RoundedCornerShape,
     contentScale: ContentScale = ContentScale.Fit,
+    onCancelUpload: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier) {
@@ -711,17 +836,26 @@ private fun UploadingImageOverlay(
                 .padding(16.dp),
             contentAlignment = Alignment.Center
         ) {
-            ExpressiveUploadIndicator(
-                uploadProgress = uploadProgress,
-                modifier = Modifier.size(56.dp)
-            )
+            if (onCancelUpload != null) {
+                CancellableAttachmentProgressIndicator(
+                    progress = uploadProgress,
+                    onCancel = onCancelUpload,
+                    showCloseScrim = false,
+                    modifier = Modifier.size(56.dp),
+                )
+            } else {
+                ExpressiveUploadIndicator(
+                    uploadProgress = uploadProgress,
+                    modifier = Modifier.size(56.dp),
+                )
+            }
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun ExpressiveUploadIndicator(
+internal fun ExpressiveUploadIndicator(
     uploadProgress: Int?,
     modifier: Modifier = Modifier,
     indicatorColor: Color? = null,
@@ -904,6 +1038,45 @@ internal fun decodeAttachmentThumbnailBase64(value: String): ByteArray? {
 }
 
 @Composable
+private fun AttachmentUploadFailedOverlay(
+    isAuthor: Boolean,
+    errorKey: String,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val failedText = when (errorKey) {
+        UPLOAD_ERROR_FILE_TOO_LARGE -> stringResource(Res.string.attachment_upload_failed_too_large)
+        else -> stringResource(Res.string.attachment_upload_failed)
+    }
+    val retryText = stringResource(Res.string.attachment_retry)
+    val retryCd = stringResource(Res.string.cd_attachment_upload_retry)
+    val headlineColor = if (isAuthor) Color.White else MaterialTheme.colorScheme.onSurface
+    Box(
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.35f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(horizontal = 12.dp),
+        ) {
+            Text(
+                text = failedText,
+                style = MaterialTheme.typography.bodySmall,
+                color = headlineColor,
+            )
+            TextButton(
+                onClick = onRetry,
+                modifier = Modifier.semantics { contentDescription = retryCd },
+            ) {
+                Text(text = retryText, color = headlineColor)
+            }
+        }
+    }
+}
+
+@Composable
 private fun AttachmentImageLoadFailedOverlay(
     isAuthor: Boolean,
     onRetry: () -> Unit,
@@ -973,11 +1146,13 @@ internal fun ExpressiveFileAttachmentRow(
     filename: String,
     sizeBytes: Long?,
     onClick: (() -> Unit)?,
+    enableClick: Boolean = onClick != null,
     isAuthor: Boolean,
     isUploading: Boolean,
     uploadProgress: Int?,
     isDownloaded: Boolean = false,
-    modifier: Modifier = Modifier
+    onCancelProgress: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
 ) {
     val headlineColor = if (isAuthor) Color.White else MaterialTheme.colorScheme.onSurface
     val supportingColor = if (isAuthor) {
@@ -989,10 +1164,14 @@ internal fun ExpressiveFileAttachmentRow(
     Row(
         modifier = modifier
             .widthIn(max = 268.dp)
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(horizontal = 6.dp, vertical = 8.dp)
             .then(
-                if (onClick != null && !isUploading) {
-                    Modifier.clickable(onClick = onClick)
+                if (onClick != null && enableClick) {
+                    Modifier.scaleOnPress(
+                        scale = 0.96f,
+                        onClick = onClick,
+                        indication = null,
+                    )
                 } else {
                     Modifier
                 }
@@ -1000,53 +1179,14 @@ internal fun ExpressiveFileAttachmentRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Box(
+        FileAttachmentLeadingSlot(
+            isProgressing = isUploading,
+            isDownloaded = isDownloaded,
+            uploadProgress = uploadProgress,
+            isAuthor = isAuthor,
+            onCancelProgress = onCancelProgress ?: {},
             modifier = Modifier.size(leadingSize),
-            contentAlignment = Alignment.Center
-        ) {
-            if (isUploading) {
-                ExpressiveUploadIndicator(
-                    uploadProgress = uploadProgress,
-                    modifier = Modifier.size(leadingSize),
-                    indicatorColor = if (isAuthor) Color.White else null,
-                    trackColorOverride = if (isAuthor) {
-                        Color.White.copy(alpha = 0.28f)
-                    } else {
-                        null
-                    }
-                )
-            } else {
-                Surface(
-                    shape = CircleShape,
-                    color = if (isAuthor) {
-                        Color.White.copy(alpha = 0.22f)
-                    } else {
-                        MaterialTheme.colorScheme.secondaryContainer
-                    },
-                    modifier = Modifier.size(leadingSize)
-                ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (isDownloaded) {
-                                Icons.Rounded.InsertDriveFile
-                            } else {
-                                Icons.Rounded.Download
-                            },
-                            contentDescription = null,
-                            modifier = Modifier.size(26.dp),
-                            tint = if (isAuthor) {
-                                Color.White
-                            } else {
-                                MaterialTheme.colorScheme.onSecondaryContainer
-                            }
-                        )
-                    }
-                }
-            }
-        }
+        )
         Column(
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {

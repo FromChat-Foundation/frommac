@@ -37,7 +37,10 @@ import ru.fromchat.crypto.DmCiphertextCorruptedException
 import ru.fromchat.crypto.decryptEnvelope
 import ru.fromchat.ui.chat.AvatarInfo
 import ru.fromchat.ui.chat.ChatPanel
+import ru.fromchat.ui.chat.DecryptedFileCache
 import ru.fromchat.ui.chat.DecryptedImageCache
+import ru.fromchat.ui.chat.isImageFilename
+import ru.fromchat.ui.chat.seedOutboundFileAsDownloaded
 import ru.fromchat.ui.chat.DownloadedFileRegistry
 import ru.fromchat.ui.chat.DmTypingHandler
 import ru.fromchat.ui.chat.TypingHandler
@@ -342,6 +345,19 @@ class DmPanel(
                     clientMessageId = cid,
                 )
                 DecryptedImageCache.ensureDiskAliasForMessageId(
+                    messageId = envelope.id,
+                    fileIndex = 0,
+                    clientMessageId = cid,
+                )
+            } else if (!isImageAttachment && localUri != null && dmFile != null) {
+                seedOutboundFileAsDownloaded(
+                    messageId = envelope.id,
+                    fileIndex = 0,
+                    localFileUri = localUri,
+                    displayFilename = dmFile.name,
+                    clientMessageId = cid,
+                )
+                DecryptedFileCache.ensureDiskAliasForMessageId(
                     messageId = envelope.id,
                     fileIndex = 0,
                     clientMessageId = cid,

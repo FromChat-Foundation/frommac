@@ -326,6 +326,8 @@ private fun ContextMenuContent(
     val labelCancelSend = stringResource(Res.string.action_cancel_send)
     val isQueued = message.isQueuedOutbound() && isAuthor
     val savableImage = resolveSavableMessageImage(message)
+    val savableFile = resolveSavableMessageFile(message)
+    val canSave = savableImage != null || savableFile != null
 
     Box(modifier = containerModifier) {
         Box(modifier = Modifier.matchParentSize().background(menuColor, menuShape))
@@ -342,7 +344,7 @@ private fun ContextMenuContent(
                     onClick = { onCopy(message) }
                 )
             }
-            if (savableImage != null) {
+            if (canSave) {
                 ContextMenuItem(
                     icon = Icons.Rounded.SaveAlt,
                     text = labelSave,

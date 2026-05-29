@@ -21,6 +21,21 @@ object DownloadedFileRegistry {
     private val memory = mutableMapOf<String, String>()
     private var diskIndexLoaded = false
 
+    fun messageIdFromStorageKey(storageKey: String): Int? {
+        if (!storageKey.startsWith("file_") || storageKey.startsWith("file_c_")) return null
+        return storageKey.removePrefix("file_").substringBefore('_').toIntOrNull()
+    }
+
+    fun fileIndexFromStorageKey(storageKey: String): Int? {
+        if (storageKey.startsWith("file_c_")) {
+            return storageKey.substringAfterLast('_').toIntOrNull()
+        }
+        if (storageKey.startsWith("file_")) {
+            return storageKey.substringAfterLast('_').toIntOrNull()
+        }
+        return null
+    }
+
     fun storageKey(
         messageId: Int,
         fileIndex: Int,

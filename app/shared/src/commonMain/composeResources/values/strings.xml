@@ -87,7 +87,12 @@
     <string name="message_replying_to">Reply to %1$s</string>
     <string name="message_corrupted_short">Can’t show this message</string>
     <string name="attachment_image_load_failed">Failed to load</string>
+    <string name="attachment_upload_failed">Couldn\'t send file</string>
+    <string name="attachment_upload_failed_too_large">File is too large to send on this device</string>
+    <string name="cd_attachment_upload_retry">Retry sending file</string>
     <string name="attachment_retry">Retry</string>
+    <string name="attachment_open_failed">Couldn\'t open this file. Try Save from the message menu.</string>
+    <string name="attachment_open_chooser_title">Open with</string>
     <string name="cd_attachment_retry">Retry loading image</string>
     <string name="message_editing_title">Edit message</string>
 
@@ -100,6 +105,14 @@
     <string name="action_save">Save</string>
     <string name="notif_media_upload_percent">%1$d\u0025</string>
     <string name="notif_media_upload_progress">%1$s · %2$s</string>
+    <string name="notif_file_copy_channel_name">Saving file</string>
+    <string name="notif_file_copy_title">Saving attachment</string>
+    <string name="notif_file_copy_text">Copying file in the background</string>
+    <string name="notif_file_download_channel_name">File download</string>
+    <string name="notif_file_download_title">Downloading attachment</string>
+    <string name="notif_file_download_text">Download continues in the background</string>
+    <string name="notif_file_download_percent">%1$d\u0025</string>
+    <string name="notif_file_download_progress">%1$s · %2$s</string>
 
     <!-- Chat input -->
     <string name="cd_close">Close</string>

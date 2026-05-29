@@ -85,6 +85,20 @@ actual object DmCrypto {
         }
     }
 
+    actual suspend fun decryptAesGcmFileToPath(
+        ivB64: String,
+        encryptedFilePath: String,
+        mek: ByteArray,
+        outputPath: String,
+    ): Long = withContext(Dispatchers.Default) {
+        val iv = Base64
+            .decode(ivB64)
+            .require("IV must be 12 bytes") {
+                it.size == GCM_IV_SIZE
+            }
+        DmFileOps.aesGcmDecryptFileToPath(iv, encryptedFilePath, mek, outputPath)
+    }
+
     private suspend fun aesGcmDecrypt(key: ByteArray, iv: ByteArray, ciphertext: ByteArray): ByteArray {
         require(iv.size == GCM_IV_SIZE) { "IV must be 12 bytes for GCM" }
         require(key.size == AES_KEY_SIZE) { "Key must be 32 bytes" }

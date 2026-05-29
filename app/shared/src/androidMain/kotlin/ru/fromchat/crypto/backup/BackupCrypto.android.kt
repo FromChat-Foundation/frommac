@@ -84,4 +84,5 @@ object BackupCryptoPlatform {
             cipher.init(Cipher.DECRYPT_MODE, secretKey, parameterSpec)
             cipher.doFinal(ciphertext)
         }
+
 }

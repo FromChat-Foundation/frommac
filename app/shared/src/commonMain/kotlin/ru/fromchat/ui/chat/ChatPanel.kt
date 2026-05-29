@@ -235,6 +235,7 @@ abstract class ChatPanel(
         if (cid.isEmpty()) return
         if (message.pendingFileUri != null) {
             clearOutboundImageCaches(cid, message.id)
+            clearOutboundFileCaches(cid, message.id)
         }
         removeMessage(message.id)
         ru.fromchat.api.outbox.OutgoingMessageCoordinator.cancelOutboundMessage(cid, outboxConversationId())

@@ -130,6 +130,17 @@ FROM message
 WHERE instanceId = ? AND conversationId = ? AND id = ? AND deletedFlag = 0
 LIMIT 1;
 
+selectMessageByNumericId:
+SELECT *
+FROM message
+WHERE instanceId = ? AND id = ? AND deletedFlag = 0
+LIMIT 1;
+
+selectMessagesForInstance:
+SELECT *
+FROM message
+WHERE instanceId = ? AND deletedFlag = 0;
+
 deleteMessagesForConversation:
 DELETE FROM message
 WHERE instanceId = ? AND conversationId = ?;

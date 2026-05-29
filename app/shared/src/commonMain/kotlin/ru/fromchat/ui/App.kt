@@ -41,6 +41,7 @@ import androidx.navigation.navArgument
 import coil3.ImageLoader
 import coil3.compose.setSingletonImageLoaderFactory
 import coil3.svg.SvgDecoder
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
@@ -52,6 +53,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import ru.fromchat.AppForeground
 import ru.fromchat.api.ApiClient
+import ru.fromchat.api.AttachmentDownloadNotifier
 import ru.fromchat.api.ProfileCache
 import ru.fromchat.api.UpdateSyncManager
 import ru.fromchat.api.UserStatusStore
@@ -189,49 +191,16 @@ fun App(
     }
 
     var startDestination by remember { mutableStateOf<String?>(null) }
+    var sessionLogoutRequired by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        runCatching {
-            Config.initialize()
+        kotlinx.coroutines.withContext(Dispatchers.Default) {
+            runCatching { Config.initialize() }
+            runCatching { ensureFromChatCacheGeneration() }
+            runCatching { NetworkConnectivity.ensureStarted() }
+            runCatching { ApiClient.loadPersistedData() }
         }
 
-        runCatching { ensureFromChatCacheGeneration() }
-
-        runCatching { NetworkConnectivity.ensureStarted() }
-
-        // Load persisted token and user data
-        ApiClient.loadPersistedData()
-
-        val hasTokenForBootstrap = ApiClient.token?.isNotEmpty() == true
-        if (hasTokenForBootstrap) {
-            when (ru.fromchat.core.instance.bootstrapSessionInstance(hasToken = true)) {
-                ru.fromchat.core.instance.SessionBootstrapResult.LogoutRequired -> {
-                    ru.fromchat.core.instance.logoutIfInstanceUnsupported()
-                    startDestination = "login"
-                    return@LaunchedEffect
-                }
-                ru.fromchat.core.instance.SessionBootstrapResult.OfflineCached,
-                ru.fromchat.core.instance.SessionBootstrapResult.Ready,
-                -> Unit
-            }
-        }
-
-        runCatching { ProfileCache.hydrateFromDisk() }
-
-        val hasTokenInitially = ApiClient.token?.isNotEmpty() == true
-        if (hasTokenInitially) {
-            runCatching {
-                val ownProfile = ApiClient.getOwnProfile()
-                ApiClient.syncSuspensionStateFromProfile(ownProfile)
-            }
-        }
-
-        // Initialize update sync state for the current user (if any)
-        runCatching {
-            UpdateSyncManager.initializeFromStorage(ApiClient.user?.id)
-        }
-
-        // Now determine start destination based on loaded token
         val hasToken = ApiClient.token?.isNotEmpty() == true
         startDestination = when {
             hasToken && startAtDmConversationUserId != null -> "chat"
@@ -239,6 +208,34 @@ fun App(
             hasToken && !startAtPublicChat -> "chat"
             else -> "login"
         }
+
+        runCatching {
+            UpdateSyncManager.initializeFromStorage(ApiClient.user?.id)
+        }
+
+        ru.fromchat.core.DeferredStartupNetwork.scheduleAfterUiVisible()
+
+        if (!hasToken) return@LaunchedEffect
+
+        launch(Dispatchers.Default) {
+            runCatching {
+                ru.fromchat.core.instance.bootstrapSessionOnStartup(
+                    hasToken = true,
+                    onLogoutRequired = { sessionLogoutRequired = true },
+                )
+            }
+        }
+
+        launch(Dispatchers.Default) {
+            runCatching { ProfileCache.hydrateFromDisk() }
+        }
+    }
+
+    LaunchedEffect(sessionLogoutRequired) {
+        if (!sessionLogoutRequired) return@LaunchedEffect
+        ru.fromchat.core.instance.logoutIfInstanceUnsupported()
+        startDestination = "login"
+        sessionLogoutRequired = false
     }
 
     // Foreground → WebSocket reconnect; background → pause reconnect attempts (see [WebSocketManager]).

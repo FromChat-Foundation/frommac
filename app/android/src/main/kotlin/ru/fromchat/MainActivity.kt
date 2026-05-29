@@ -22,7 +22,6 @@ import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
-import io.ktor.client.plugins.ClientRequestException
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
@@ -41,9 +40,6 @@ private const val EXTRA_MESSAGE_ID = "scroll_to_message_id"
 private const val CHAT_TYPE_PUBLIC = "public"
 private const val CHAT_TYPE_DM = "dm"
 private const val INVALID_PROFILE_DEEP_LINK_MESSAGE = "Could not open this profile link. Use fromchat://u/<idOrUsername>."
-private const val PROFILE_NOT_FOUND_MESSAGE = "This profile could not be found"
-private const val PROFILE_OPEN_FAILED_MESSAGE = "Could not open this profile. Please try again."
-
 private data class ProfileDeepLinkResolution(
     val scrollToMessageId: Int? = null,
     val startAtPublicChat: Boolean = false,
@@ -52,13 +48,6 @@ private data class ProfileDeepLinkResolution(
     val startAtProfileUsername: String? = null,
     val profileLookupErrorMessage: String? = null
 )
-
-private fun getProfileLookupFailureMessage(error: Throwable): String =
-    if (error is ClientRequestException && error.response.status.value == 404) {
-        PROFILE_NOT_FOUND_MESSAGE
-    } else {
-        PROFILE_OPEN_FAILED_MESSAGE
-    }
 
 private data class ProfileDeepLinkTarget(
     val userId: Int? = null,
@@ -78,7 +67,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) {}
 
-    private suspend fun buildLaunchState(intent: Intent?): ProfileDeepLinkResolution {
+    private fun parseLaunchStateFromIntent(intent: Intent?): ProfileDeepLinkResolution {
         Logger.d(
             "ProfileDeepLink",
             "handleIntent: action=${intent?.action}, data=${intent?.dataString}, messageId=${intent?.getIntExtra(EXTRA_MESSAGE_ID, -1)}, " +
@@ -92,6 +81,10 @@ class MainActivity : ComponentActivity() {
             "ProfileDeepLink",
             "handleIntent parsedProfileTarget: userId=${profileTarget?.userId}, username=${profileTarget?.username}, parseError=${profileTarget?.parseError}"
         )
+
+        if (intent?.getBooleanExtra(EXTRA_MARK_MESSAGE_READ, false) == true) {
+            markMessagesAsRead()
+        }
 
         val baseState = ProfileDeepLinkResolution(
             scrollToMessageId = if (messageId != -1) messageId else null,
@@ -111,39 +104,26 @@ class MainActivity : ComponentActivity() {
             return baseState
         }
 
-        var lookupFailureMessage: String? = null
-        val resolvedProfileId = if (profileTarget.userId != null) {
-            runCatching {
-                ApiClient.getProfileById(profileTarget.userId).id
-            }.onFailure { err ->
-                Logger.d("ProfileDeepLink", "profile deep link lookup failed by id: ${err.message}")
-                lookupFailureMessage = getProfileLookupFailureMessage(err)
-            }.getOrNull()
-        } else if (!profileTarget.username.isNullOrBlank()) {
-            runCatching {
-                ApiClient.getProfileByUsername(profileTarget.username).id
-            }.onFailure { err ->
-                Logger.d("ProfileDeepLink", "profile deep link lookup failed by username: ${err.message}")
-                lookupFailureMessage = getProfileLookupFailureMessage(err)
-            }.getOrNull()
-        } else {
-            null
+        val profileUserId = profileTarget.userId
+        val profileUsername = profileTarget.username?.trim().orEmpty()
+        if (profileUserId != null && profileUserId > 0) {
+            return baseState.copy(
+                startAtProfileUserId = profileUserId,
+                startAtProfileUsername = null,
+                startAtDmConversationUserId = null,
+                startAtPublicChat = false,
+            )
+        }
+        if (profileUsername.isNotEmpty()) {
+            return baseState.copy(
+                startAtProfileUserId = null,
+                startAtProfileUsername = profileUsername,
+                startAtDmConversationUserId = null,
+                startAtPublicChat = false,
+            )
         }
 
-        if (resolvedProfileId == null) {
-            return baseState.copy(profileLookupErrorMessage = lookupFailureMessage ?: PROFILE_OPEN_FAILED_MESSAGE)
-        }
-
-        if (intent?.getBooleanExtra(EXTRA_MARK_MESSAGE_READ, false) == true) {
-            markMessagesAsRead()
-        }
-
-        return baseState.copy(
-            startAtProfileUserId = resolvedProfileId,
-            startAtProfileUsername = null,
-            startAtDmConversationUserId = null,
-            startAtPublicChat = false
-        )
+        return baseState
     }
 
     private fun applyLaunchState(launchState: ProfileDeepLinkResolution) {
@@ -235,23 +215,22 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         enableEdgeToEdge()
 
-        lifecycleScope.launch {
-            val launchState = buildLaunchState(intent)
-            applyLaunchState(launchState)
-            setContent {
-                App(
-                    scrollToMessageId = scrollToMessageId,
-                    startAtPublicChat = startAtPublicChat,
-                    startAtDmConversationUserId = startAtDmConversationUserId,
-                    startAtProfileUserId = startAtProfileUserId,
-                    startAtProfileUsername = startAtProfileUsername,
-                    profileLookupErrorMessage = profileLookupErrorMessage,
-                    onProfileLookupErrorMessageConsumed = {
-                        profileLookupErrorMessage = null
-                    }
-                )
-            }
+        applyLaunchState(parseLaunchStateFromIntent(intent))
+        setContent {
+            App(
+                scrollToMessageId = scrollToMessageId,
+                startAtPublicChat = startAtPublicChat,
+                startAtDmConversationUserId = startAtDmConversationUserId,
+                startAtProfileUserId = startAtProfileUserId,
+                startAtProfileUsername = startAtProfileUsername,
+                profileLookupErrorMessage = profileLookupErrorMessage,
+                onProfileLookupErrorMessageConsumed = {
+                    profileLookupErrorMessage = null
+                }
+            )
+        }
 
+        lifecycleScope.launch {
             checkGooglePlayServices()
         }
 
@@ -263,10 +242,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        lifecycleScope.launch {
-            val launchState = buildLaunchState(intent)
-            applyLaunchState(launchState)
-        }
+        setIntent(intent)
+        applyLaunchState(parseLaunchStateFromIntent(intent))
     }
 
     override fun onPause() {

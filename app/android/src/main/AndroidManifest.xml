@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Required when handing APKs to com.google.android.packageinstaller via ACTION_VIEW. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:enableOnBackInvokedCallback="true"
@@ -52,5 +54,15 @@
                 <action android:name="${applicationId}.NOTIFICATION_REPLY" />
             </intent-filter>
         </receiver>
+
+        <provider
+            android:name="ru.fromchat.core.files.AttachmentFileProvider"
+            android:authorities="${applicationId}.attachment_files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/fromchat_attachment_paths" />
+        </provider>
     </application>
 </manifest>

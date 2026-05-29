@@ -15,19 +15,34 @@ import ru.fromchat.api.db.MessageCacheStore
 import ru.fromchat.api.db.MessageDatabaseProvider
 import ru.fromchat.api.db.conversationIdForDm
 import ru.fromchat.core.cache.OutboundFileUnavailableException
+import ru.fromchat.core.cache.UPLOAD_ERROR_FILE_TOO_LARGE
 import ru.fromchat.core.cache.clearUploadSecretsOnly
 import ru.fromchat.api.optimisticMessageIdForClientMessageId
+import ru.fromchat.core.cache.commitEncryptedUploadBlob
+import ru.fromchat.core.cache.encryptedUploadBlobPartPath
+import ru.fromchat.core.cache.encryptedUploadBlobSizeBytes
+import ru.fromchat.core.cache.isEncryptedBlobReady
+import ru.fromchat.core.cache.isFileTooLargeForUpload
+import ru.fromchat.core.cache.isLikelyUploadMemoryError
 import ru.fromchat.core.cache.isOutboundFileUnavailable
-import ru.fromchat.ui.chat.AttachmentMediaLog
-import ru.fromchat.ui.chat.clearOutboundImageCaches
 import ru.fromchat.core.cache.loadEncryptedUploadBlob
 import ru.fromchat.core.cache.loadUploadTransportCipherJson
+import ru.fromchat.core.cache.queryOutboundUriSizeBytes
+import ru.fromchat.core.cache.readEncryptedUploadBlobRange
 import ru.fromchat.core.cache.readOutboundFileBytes
+import ru.fromchat.core.cache.repairInterruptedUploadArtifacts
 import ru.fromchat.core.cache.saveEncryptedUploadBlob
-import ru.fromchat.core.cache.saveUploadTransportCipherJson
+import ru.fromchat.core.cache.saveUploadTransportCipherJsonAtomic
+import ru.fromchat.core.cache.shouldStreamEncryptPlaintext
 import ru.fromchat.core.cache.stageOutboundFileForUpload
+import ru.fromchat.ui.chat.AttachmentMediaLog
+import ru.fromchat.ui.chat.clearOutboundFileCaches
+import ru.fromchat.ui.chat.clearOutboundImageCaches
+import ru.fromchat.ui.chat.isImageFilename
+import ru.fromchat.ui.chat.seedOutboundFileAsDownloaded
 import ru.fromchat.crypto.transport.TransportCiphertext
 import ru.fromchat.crypto.transport.TransportCrypto
+import ru.fromchat.crypto.transport.TransportFileEncryptor
 import ru.fromchat.db.Outbox
 
 private const val INLINE_UPLOAD_THRESHOLD_BYTES = 512 * 1024
@@ -85,12 +100,22 @@ object DmAttachmentOutboxHandler {
 
         val serverUploadId = arrayOf(payload.uploadId.trim())
         return runCatching {
+            repairInterruptedUploadArtifacts(instanceId, clientMessageId)
             ensureStillQueued(instanceId, clientMessageId)
             AttachmentUploadNotifier.emit(
                 AttachmentUploadProgress.Pending(clientMessageId, payload.filename),
                 messageLabel = payload.plaintext,
             )
             val stagedPayload = ensureStagedPayload(instanceId, row, payload)
+            if (!isImageFilename(stagedPayload.filename)) {
+                seedOutboundFileAsDownloaded(
+                    messageId = optimisticMessageIdForClientMessageId(clientMessageId),
+                    fileIndex = 0,
+                    localFileUri = stagedPayload.fileUri,
+                    displayFilename = stagedPayload.filename,
+                    clientMessageId = clientMessageId,
+                )
+            }
             ensureStillQueued(instanceId, clientMessageId)
             val restoredPercent = uploadPercent(row.bytesUploaded, stagedPayload)
             if (restoredPercent > 0) {
@@ -99,55 +124,50 @@ object DmAttachmentOutboxHandler {
                 emitProgress(clientMessageId, 0, stagedPayload.filename, stagedPayload.plaintext)
             }
 
-            val prepared = loadPrepared(instanceId, clientMessageId)
-            val encryptedBlob: ByteArray
-            val msgCipher: TransportCiphertext
             var activePayload = stagedPayload
-
-            if (prepared != null) {
-                encryptedBlob = prepared.first
-                msgCipher = prepared.second
-                if (activePayload.encryptedFileSizeBytes <= 0L) {
-                    activePayload = activePayload.copy(encryptedFileSizeBytes = encryptedBlob.size.toLong())
-                }
+            val expectedEncryptedSize = activePayload.encryptedFileSizeBytes.takeIf { it > 0L }
+            val preparedCipher = loadPreparedCipher(
+                instanceId,
+                clientMessageId,
+                expectedEncryptedSize,
+            )
+            var encryptedSize = encryptedUploadBlobSizeBytes(instanceId, clientMessageId)
+                ?.takeIf { it > 0L }
+                ?: expectedEncryptedSize
+            val msgCipher: TransportCiphertext
+            if (preparedCipher != null && encryptedSize != null) {
+                msgCipher = preparedCipher
             } else {
-                ensureStillQueued(instanceId, clientMessageId)
-                val bytes = readOutboundFileBytes(stagedPayload.fileUri)
-                OutgoingMessageCoordinator.abortDmServerUploadIfNeeded(stagedPayload.uploadId)
-                serverUploadId[0] = ""
-                activePayload = stagedPayload.copy(uploadId = "", encryptedFileSizeBytes = 0L)
-                persistPayloadProgress(instanceId, row, activePayload, bytesUploaded = 0L)
-                ensureStillQueued(instanceId, clientMessageId)
-                val transportKey = ApiClient.getTransportPublicKey()
-                val (freshCipher, ephemeralSecret) = TransportCrypto.encryptWithTransportKeyWithEphemeralSecret(
-                    plaintext = stagedPayload.plaintext,
-                    transportPublicKeyB64 = transportKey.publicKeyB64,
+                clearPrepared(instanceId, clientMessageId)
+                val encrypted = encryptAndPersistToDisk(
+                    instanceId = instanceId,
+                    row = row,
+                    stagedPayload = stagedPayload,
+                    serverUploadId = serverUploadId,
                 )
-                try {
-                    val blob = TransportCrypto.encryptFileForTransport(
-                        fileBytes = bytes,
-                        transportPublicKeyB64 = transportKey.publicKeyB64,
-                        ephemeralSecretKey = ephemeralSecret,
-                    )
-                    encryptedBlob = blob
-                    msgCipher = freshCipher
-                    savePrepared(instanceId, clientMessageId, encryptedBlob, msgCipher)
-                    activePayload = activePayload.copy(encryptedFileSizeBytes = encryptedBlob.size.toLong())
-                    persistPayloadProgress(instanceId, row, activePayload, bytesUploaded = 0L)
-                } finally {
-                    ephemeralSecret.fill(0)
-                }
+                encryptedSize = encrypted.encryptedSize
+                msgCipher = encrypted.cipher
+                activePayload = encrypted.payload
+            }
+            val blobSize = encryptedSize ?: return@runCatching false
+            if (activePayload.encryptedFileSizeBytes <= 0L) {
+                activePayload = activePayload.copy(encryptedFileSizeBytes = blobSize)
+            }
+            if (!isEncryptedBlobReady(instanceId, clientMessageId, blobSize)) {
+                return@runCatching false
             }
 
             ensureStillQueued(instanceId, clientMessageId)
-            if (encryptedBlob.size <= INLINE_UPLOAD_THRESHOLD_BYTES) {
+            if (blobSize <= INLINE_UPLOAD_THRESHOLD_BYTES) {
+                val encryptedBlob = loadEncryptedUploadBlob(instanceId, clientMessageId)
+                    ?: return@runCatching false
                 sendInline(activePayload, encryptedBlob, msgCipher)
             } else {
                 sendResumable(
                     instanceId = instanceId,
                     row = row,
                     payload = activePayload,
-                    encryptedBlob = encryptedBlob,
+                    encryptedSize = blobSize,
                     msgCipher = msgCipher,
                     serverUploadId = serverUploadId,
                 )
@@ -186,22 +206,121 @@ object DmAttachmentOutboxHandler {
                     messageLabel = payload.plaintext,
                 )
                 runCatching {
-                    clearOutboundImageCaches(
-                        clientMessageId,
-                        optimisticMessageIdForClientMessageId(clientMessageId),
-                    )
+                    val optimisticId = optimisticMessageIdForClientMessageId(clientMessageId)
+                    clearOutboundImageCaches(clientMessageId, optimisticId)
+                    clearOutboundFileCaches(clientMessageId, optimisticId)
                     OutgoingMessageCoordinator.cancelOutboundMessage(clientMessageId, row.conversationId)
                 }
                 return true
             }
+            val failureKey = when {
+                error.message == UPLOAD_ERROR_FILE_TOO_LARGE -> UPLOAD_ERROR_FILE_TOO_LARGE
+                isLikelyUploadMemoryError(error) -> UPLOAD_ERROR_FILE_TOO_LARGE
+                else -> error.message ?: "Upload failed"
+            }
             AttachmentUploadNotifier.emit(
                 AttachmentUploadProgress.Failed(
                     jobId = clientMessageId,
-                    error = error.message ?: "Upload failed",
+                    error = failureKey,
                 ),
                 messageLabel = payload.plaintext,
             )
             false
+        }
+    }
+
+    private data class EncryptedUploadPrepared(
+        val encryptedSize: Long,
+        val cipher: TransportCiphertext,
+        val payload: DmAttachmentOutboxPayload,
+    )
+
+    private suspend fun encryptAndPersistToDisk(
+        instanceId: String,
+        row: Outbox,
+        stagedPayload: DmAttachmentOutboxPayload,
+        serverUploadId: Array<String>,
+    ): EncryptedUploadPrepared {
+        repairInterruptedUploadArtifacts(instanceId, stagedPayload.clientMessageId)
+        ensureStillQueued(instanceId, stagedPayload.clientMessageId)
+        if (isFileTooLargeForUpload(stagedPayload.fileSizeBytes)) {
+            throw IllegalStateException(UPLOAD_ERROR_FILE_TOO_LARGE)
+        }
+        OutgoingMessageCoordinator.abortDmServerUploadIfNeeded(stagedPayload.uploadId)
+        serverUploadId[0] = ""
+        var activePayload = stagedPayload.copy(uploadId = "", encryptedFileSizeBytes = 0L)
+        persistPayloadProgress(instanceId, row, activePayload, bytesUploaded = 0L)
+        ensureStillQueued(instanceId, stagedPayload.clientMessageId)
+        val transportKey = ApiClient.getTransportPublicKey()
+        val (freshCipher, ephemeralSecret) = TransportCrypto.encryptWithTransportKeyWithEphemeralSecret(
+            plaintext = stagedPayload.plaintext,
+            transportPublicKeyB64 = transportKey.publicKeyB64,
+        )
+        try {
+            val cipherJson = json.encodeToString(
+                StoredTransportCipher(
+                    clientPublicKeyB64 = freshCipher.clientPublicKeyB64,
+                    nonceB64 = freshCipher.nonceB64,
+                    ciphertextB64 = freshCipher.ciphertextB64,
+                ),
+            )
+            val encryptedSize = if (shouldStreamEncryptPlaintext(stagedPayload.fileSizeBytes)) {
+                val destPath = encryptedUploadBlobPartPath(instanceId, stagedPayload.clientMessageId)
+                val size = TransportFileEncryptor.encryptPlaintextFileToTransportBlob(
+                    sourceUri = stagedPayload.fileUri,
+                    destinationPath = destPath,
+                    transportPublicKeyB64 = transportKey.publicKeyB64,
+                    ephemeralSecretKey = ephemeralSecret,
+                    plaintextSizeBytes = stagedPayload.fileSizeBytes,
+                    onPlaintextProgress = { read, total ->
+                        if (total > 0L) {
+                            val percent = ((read.toDouble() / total.toDouble()) * 50.0).toInt().coerceIn(0, 50)
+                            emitProgress(
+                                stagedPayload.clientMessageId,
+                                percent,
+                                stagedPayload.filename,
+                                stagedPayload.plaintext,
+                            )
+                        }
+                    },
+                )
+                saveUploadTransportCipherJsonAtomic(instanceId, stagedPayload.clientMessageId, cipherJson)
+                commitEncryptedUploadBlob(instanceId, stagedPayload.clientMessageId, size)
+                size
+            } else {
+                val bytes = try {
+                    readOutboundFileBytes(stagedPayload.fileUri)
+                } catch (error: Throwable) {
+                    if (isLikelyUploadMemoryError(error)) {
+                        throw IllegalStateException(UPLOAD_ERROR_FILE_TOO_LARGE)
+                    }
+                    throw error
+                }
+                val blob = try {
+                    TransportCrypto.encryptFileForTransport(
+                        fileBytes = bytes,
+                        transportPublicKeyB64 = transportKey.publicKeyB64,
+                        ephemeralSecretKey = ephemeralSecret,
+                    )
+                } catch (error: Throwable) {
+                    if (isLikelyUploadMemoryError(error)) {
+                        throw IllegalStateException(UPLOAD_ERROR_FILE_TOO_LARGE)
+                    }
+                    throw error
+                }
+                saveEncryptedUploadBlob(instanceId, stagedPayload.clientMessageId, blob)
+                saveUploadTransportCipherJsonAtomic(instanceId, stagedPayload.clientMessageId, cipherJson)
+                commitEncryptedUploadBlob(instanceId, stagedPayload.clientMessageId, blob.size.toLong())
+                blob.size.toLong()
+            }
+            if (encryptedSize <= 0L) {
+                throw IllegalStateException(UPLOAD_ERROR_FILE_TOO_LARGE)
+            }
+            activePayload = activePayload.copy(encryptedFileSizeBytes = encryptedSize)
+            persistPayloadProgress(instanceId, row, activePayload, bytesUploaded = 0L)
+            return EncryptedUploadPrepared(encryptedSize, freshCipher, activePayload)
+        } finally {
+            ephemeralSecret.fill(0)
         }
     }
 
@@ -229,55 +348,93 @@ object DmAttachmentOutboxHandler {
         instanceId: String,
         row: Outbox,
         payload: DmAttachmentOutboxPayload,
-        encryptedBlob: ByteArray,
+        encryptedSize: Long,
         msgCipher: TransportCiphertext,
         serverUploadId: Array<String>,
     ) {
-        var uploadId = payload.uploadId.trim().ifBlank { serverUploadId[0] }
+        if (encryptedSize <= 0L) return
+        if (!isEncryptedBlobReady(instanceId, payload.clientMessageId, encryptedSize)) {
+            throw OutboundFileUnavailableException("Encrypted upload blob not ready")
+        }
+        var activePayload = payload
+        var bytesUploaded = row.bytesUploaded.coerceAtLeast(0L)
+        if (bytesUploaded > encryptedSize) {
+            bytesUploaded = 0L
+        }
+        if (payload.encryptedFileSizeBytes > 0L && payload.encryptedFileSizeBytes != encryptedSize) {
+            bytesUploaded = 0L
+            val staleUploadId = activePayload.uploadId.trim()
+            if (staleUploadId.isNotEmpty()) {
+                OutgoingMessageCoordinator.abortDmServerUploadIfNeeded(staleUploadId)
+            }
+            activePayload = activePayload.copy(uploadId = "")
+        }
+        var uploadId = activePayload.uploadId.trim().ifBlank { serverUploadId[0] }
         try {
             if (uploadId.isEmpty()) {
                 val init = ApiClient.initDmUpload(
                     filename = payload.filename,
-                    totalSize = encryptedBlob.size.toLong(),
+                    totalSize = encryptedSize,
                     recipientId = payload.recipientId,
                     chunkSize = DEFAULT_CHUNK_SIZE,
                 )
                 uploadId = init.uploadId
                 serverUploadId[0] = uploadId
-                persistPayloadProgress(instanceId, row, payload.copy(uploadId = uploadId), row.bytesUploaded)
+                persistPayloadProgress(instanceId, row, activePayload.copy(uploadId = uploadId), bytesUploaded)
             } else {
                 serverUploadId[0] = uploadId
             }
 
-            var offset = row.bytesUploaded.toInt().coerceAtLeast(0)
-            val serverOffset = ApiClient.getDmUploadStatus(uploadId).offset.toInt().coerceAtLeast(0)
-            offset = maxOf(offset, serverOffset)
-            while (offset < encryptedBlob.size) {
-                ensureStillQueued(instanceId, payload.clientMessageId)
-                val nextOffset = minOf(offset + DEFAULT_CHUNK_SIZE, encryptedBlob.size)
-                val chunk = encryptedBlob.copyOfRange(offset, nextOffset)
+            val serverStatus = ApiClient.getDmUploadStatus(uploadId)
+            val serverOffset = serverStatus.offset.coerceAtLeast(0L)
+            if (serverStatus.totalSize > 0L && serverStatus.totalSize != encryptedSize) {
+                OutgoingMessageCoordinator.abortDmServerUploadIfNeeded(uploadId)
+                uploadId = ""
+                serverUploadId[0] = ""
+                bytesUploaded = 0L
+                val init = ApiClient.initDmUpload(
+                    filename = activePayload.filename,
+                    totalSize = encryptedSize,
+                    recipientId = activePayload.recipientId,
+                    chunkSize = DEFAULT_CHUNK_SIZE,
+                )
+                uploadId = init.uploadId
+                serverUploadId[0] = uploadId
+                activePayload = activePayload.copy(uploadId = uploadId)
+                persistPayloadProgress(instanceId, row, activePayload, bytesUploaded)
+            }
+            var offset = maxOf(bytesUploaded, serverOffset)
+            while (offset < encryptedSize) {
+                ensureStillQueued(instanceId, activePayload.clientMessageId)
+                val chunkLen = minOf(DEFAULT_CHUNK_SIZE.toLong(), encryptedSize - offset).toInt()
+                val chunk = readEncryptedUploadBlobRange(
+                    instanceId = instanceId,
+                    clientMessageId = activePayload.clientMessageId,
+                    offset = offset,
+                    length = chunkLen,
+                )
                 ApiClient.uploadDmChunk(
                     uploadId = uploadId,
-                    offset = offset.toLong(),
+                    offset = offset,
                     dataB64 = Base64.encode(chunk),
                 )
-                offset = nextOffset
-                val percent = ((offset.toDouble() / encryptedBlob.size.toDouble()) * 100.0).toInt()
-                emitProgress(payload.clientMessageId, percent, payload.filename, payload.plaintext)
+                offset += chunk.size.toLong()
+                val percent = ((offset.toDouble() / encryptedSize.toDouble()) * 100.0).toInt()
+                emitProgress(activePayload.clientMessageId, percent, activePayload.filename, activePayload.plaintext)
                 persistPayloadProgress(
                     instanceId,
                     row,
-                    payload.copy(uploadId = uploadId),
-                    offset.toLong(),
+                    activePayload.copy(uploadId = uploadId),
+                    offset,
                 )
             }
 
             val completed: DmUploadCompleteResponse = ApiClient.completeDmUpload(uploadId)
             ApiClient.sendDm(
-                recipientId = payload.recipientId,
-                plaintext = payload.plaintext,
-                clientMessageId = payload.clientMessageId,
-                replyToId = payload.replyToId,
+                recipientId = activePayload.recipientId,
+                plaintext = activePayload.plaintext,
+                clientMessageId = activePayload.clientMessageId,
+                replyToId = activePayload.replyToId,
                 uploadedFileIds = listOf(completed.fileId),
                 preparedTransport = msgCipher,
             )
@@ -294,14 +451,22 @@ object DmAttachmentOutboxHandler {
         row: Outbox,
         payload: DmAttachmentOutboxPayload,
     ): DmAttachmentOutboxPayload {
-        val staged = stageOutboundFileForUpload(instanceId, payload.clientMessageId, payload.fileUri)
+        val expectedSize = payload.fileSizeBytes.takeIf { it > 0L }
+            ?: queryOutboundUriSizeBytes(payload.fileUri)
+            ?: 0L
+        val staged = stageOutboundFileForUpload(
+            instanceId = instanceId,
+            clientMessageId = payload.clientMessageId,
+            sourceUri = payload.fileUri,
+            expectedSizeBytes = expectedSize,
+        )
         if (staged.sizeBytes <= 0L) {
             throw OutboundFileUnavailableException("Attachment file is empty or unavailable")
         }
-        if (staged.uri == payload.fileUri && staged.sizeBytes == payload.fileSizeBytes) {
-            return payload
-        }
         val updated = payload.copy(fileUri = staged.uri, fileSizeBytes = staged.sizeBytes)
+        if (updated.fileUri == payload.fileUri && updated.fileSizeBytes == payload.fileSizeBytes) {
+            return updated
+        }
         persistPayloadProgress(instanceId, row, updated, row.bytesUploaded)
         return updated
     }
@@ -328,20 +493,20 @@ object DmAttachmentOutboxHandler {
         }
     }
 
-    private suspend fun loadPrepared(
+    private suspend fun loadPreparedCipher(
         instanceId: String,
         clientMessageId: String,
-    ): Pair<ByteArray, TransportCiphertext>? {
-        val blob = loadEncryptedUploadBlob(instanceId, clientMessageId) ?: return null
+        expectedEncryptedSizeBytes: Long?,
+    ): TransportCiphertext? {
+        if (!isEncryptedBlobReady(instanceId, clientMessageId, expectedEncryptedSizeBytes)) return null
         val raw = loadUploadTransportCipherJson(instanceId, clientMessageId) ?: return null
         return runCatching {
             val stored = json.decodeFromString<StoredTransportCipher>(raw)
-            val cipher = TransportCiphertext(
+            TransportCiphertext(
                 clientPublicKeyB64 = stored.clientPublicKeyB64,
                 nonceB64 = stored.nonceB64,
                 ciphertextB64 = stored.ciphertextB64,
             )
-            blob to cipher
         }.getOrNull()
     }
 
@@ -351,13 +516,14 @@ object DmAttachmentOutboxHandler {
         blob: ByteArray,
         cipher: TransportCiphertext,
     ) {
-        saveEncryptedUploadBlob(instanceId, clientMessageId, blob)
         val stored = StoredTransportCipher(
             clientPublicKeyB64 = cipher.clientPublicKeyB64,
             nonceB64 = cipher.nonceB64,
             ciphertextB64 = cipher.ciphertextB64,
         )
-        saveUploadTransportCipherJson(instanceId, clientMessageId, json.encodeToString(stored))
+        saveEncryptedUploadBlob(instanceId, clientMessageId, blob)
+        saveUploadTransportCipherJsonAtomic(instanceId, clientMessageId, json.encodeToString(stored))
+        commitEncryptedUploadBlob(instanceId, clientMessageId, blob.size.toLong())
     }
 
     private suspend fun clearPrepared(instanceId: String, clientMessageId: String) {

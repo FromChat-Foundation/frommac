@@ -13,6 +13,14 @@
             android:exported="false"
             android:foregroundServiceType="camera|microphone" />
         <service
+            android:name="ru.fromchat.download.AttachmentDownloadForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+        <service
+            android:name="ru.fromchat.download.AttachmentFileCopyForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+        <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />

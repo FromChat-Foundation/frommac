@@ -1,23 +1,14 @@
 package ru.fromchat.ui.chat
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material.icons.rounded.InsertDriveFile
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -29,10 +20,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.stringResource
+import ru.fromchat.Res
+import ru.fromchat.attachment_open_failed
+import ru.fromchat.attachment_retry
+import ru.fromchat.attachment_upload_failed
+import ru.fromchat.attachment_upload_failed_too_large
+import ru.fromchat.cd_attachment_upload_retry
+import ru.fromchat.core.cache.UPLOAD_ERROR_FILE_TOO_LARGE
 import ru.fromchat.api.AttachmentDownloadNotifier
 import ru.fromchat.api.DmEnvelope
 import ru.fromchat.api.DmFile
@@ -52,35 +51,36 @@ fun ChatFileAttachmentTile(
     isAuthor: Boolean,
     isUploading: Boolean,
     uploadProgress: Int?,
+    uploadError: String? = null,
+    onRetryUpload: (() -> Unit)? = null,
     messageLabel: String? = null,
+    onCancelUpload: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    val openFailedMessage = stringResource(Res.string.attachment_open_failed)
     val isPendingLocal = pendingFileUri != null && file == null
+    val uploadFailed = isPendingLocal && !uploadError.isNullOrBlank()
     val mimeType = remember(filename) { mimeTypeForFilename(filename) }
 
-    var exportUri by remember(messageId, fileIndex, clientMessageId) {
+    var cacheUri by remember(messageId, fileIndex, clientMessageId) {
         mutableStateOf<String?>(null)
-    }
-    var uriAccessible by remember { mutableStateOf(false) }
-
-    LaunchedEffect(messageId, fileIndex, clientMessageId) {
-        val stored = DownloadedFileRegistry.getExportUri(messageId, fileIndex, clientMessageId)
-        exportUri = stored
-        uriAccessible = stored != null && isExportUriAccessible(stored)
-        if (stored != null && !uriAccessible) {
-            DownloadedFileRegistry.removeExportUri(messageId, fileIndex, clientMessageId)
-            exportUri = null
-            AttachmentDownloadNotifier.clearProgress(
-                messageId = messageId,
-                fileIndex = fileIndex,
-                clientMessageId = clientMessageId,
-                mirrorAsFileAttachment = true,
-            )
-        }
     }
 
     val downloadProgressByKey by AttachmentDownloadNotifier.progressPercentByKey.collectAsState()
+    val downloadCancelledKeys by AttachmentDownloadNotifier.cancelledKeys.collectAsState()
+    LaunchedEffect(messageId, fileIndex, clientMessageId) {
+        AttachmentDownloadNotifier.restorePausedForAttachment(
+            messageId = messageId,
+            fileIndex = fileIndex,
+            clientMessageId = clientMessageId,
+            mirrorAsFileAttachment = true,
+        )
+    }
+
+    LaunchedEffect(messageId, fileIndex, clientMessageId, pendingFileUri, downloadProgressByKey, downloadCancelledKeys) {
+        cacheUri = DecryptedFileCache.getCached(messageId, fileIndex, clientMessageId)
+    }
     val downloadProgress = remember(downloadProgressByKey, messageId, fileIndex, clientMessageId) {
         DownloadedFileRegistry.resolveDownloadPercent(
             messageId = messageId,
@@ -89,123 +89,179 @@ fun ChatFileAttachmentTile(
             progressByKey = downloadProgressByKey,
         )
     }
-    val isDownloading = !isUploading &&
-        downloadProgress != null &&
-        downloadProgress < 100
-
-    var pendingDownload by remember { mutableStateOf<PendingFileDownload?>(null) }
-
-    val launchDestinationPicker = rememberCreateDownloadDestinationLauncher { destination ->
-        val pending = pendingDownload
-        pendingDownload = null
-        if (destination == null || pending == null) return@rememberCreateDownloadDestinationLauncher
-        scope.launch {
-            val ok = DmFileDownloader.downloadToExportUri(
-                messageId = pending.messageId,
-                fileIndex = pending.fileIndex,
-                file = pending.file,
-                envelope = pending.envelope,
-                currentUserId = pending.currentUserId,
-                clientMessageId = pending.clientMessageId,
-                exportUri = destination,
-                messageLabel = pending.messageLabel,
-            )
-            if (ok) {
-                uriAccessible = isExportUriAccessible(destination)
-                if (!uriAccessible) {
-                    DownloadedFileRegistry.removeExportUri(
-                        pending.messageId,
-                        pending.fileIndex,
-                        pending.clientMessageId,
-                    )
-                    exportUri = null
-                }
-            } else {
-                exportUri = null
-                uriAccessible = false
-            }
-        }
+    val downloadPaused = remember(downloadCancelledKeys, messageId, fileIndex, clientMessageId) {
+        AttachmentDownloadNotifier.isCancelled(
+            messageId = messageId,
+            fileIndex = fileIndex,
+            clientMessageId = clientMessageId,
+            mirrorAsFileAttachment = true,
+        )
     }
+    val isDownloading = !isUploading && !uploadFailed &&
+        downloadProgress != null &&
+        downloadProgress < 100 &&
+        !downloadPaused
 
-    val isDownloaded = !isPendingLocal && uriAccessible && exportUri != null && !isDownloading
-    val showWavy = isUploading || isDownloading
+    val showPausedProgress = downloadPaused && downloadProgress != null && downloadProgress < 100
+    val resolvedCacheUri = cacheUri
+        ?: DecryptedFileCache.getCached(messageId, fileIndex, clientMessageId)
+    val isCached = resolvedCacheUri != null && !isDownloading
+    val showWavy = isUploading || isDownloading || showPausedProgress
+    val showProgressing = showWavy && !uploadFailed
+    val showAsDownloadedIcon = isCached && !showProgressing
+    val displayUploadProgress = if (isUploading) uploadProgress ?: 0 else uploadProgress
+    val openableLocalUri = resolvedCacheUri
+        ?: pendingFileUri?.takeIf { isPendingLocal }
 
     val onRowClick: (() -> Unit)? = when {
-        isUploading -> null
-        isPendingLocal && pendingFileUri != null -> {
+        openableLocalUri != null -> {
             {
                 scope.launch {
-                    withContext(Dispatchers.Default) {
-                        openExportUri(pendingFileUri, mimeType)
+                    val opened = openCachedAttachmentFile(openableLocalUri, mimeType, filename)
+                    if (!opened) {
+                        showAttachmentOpenFailed(openFailedMessage)
                     }
                 }
             }
         }
-        isDownloaded && exportUri != null -> {
+        downloadPaused && file != null && dmEnvelope != null -> {
             {
+                AttachmentDownloadNotifier.beginDownload(
+                    messageId = messageId,
+                    fileIndex = fileIndex,
+                    clientMessageId = clientMessageId,
+                    mirrorAsFileAttachment = true,
+                )
                 scope.launch {
-                    val accessible = isExportUriAccessible(exportUri!!)
-                    if (!accessible) {
-                        DownloadedFileRegistry.removeExportUri(messageId, fileIndex, clientMessageId)
-                        exportUri = null
-                        uriAccessible = false
+                    val ok = DmFileDownloader.downloadToCache(
+                        messageId = messageId,
+                        fileIndex = fileIndex,
+                        file = file,
+                        envelope = dmEnvelope,
+                        currentUserId = currentUserId,
+                        clientMessageId = clientMessageId,
+                        messageLabel = messageLabel,
+                    )
+                    if (ok) {
+                        cacheUri = DecryptedFileCache.getCached(messageId, fileIndex, clientMessageId)
                         AttachmentDownloadNotifier.clearProgress(
                             messageId = messageId,
                             fileIndex = fileIndex,
                             clientMessageId = clientMessageId,
                             mirrorAsFileAttachment = true,
                         )
-                        return@launch
-                    }
-                    withContext(Dispatchers.Default) {
-                        if (!openExportUri(exportUri!!, mimeType)) {
-                            DownloadedFileRegistry.removeExportUri(messageId, fileIndex, clientMessageId)
-                            exportUri = null
-                            uriAccessible = false
-                        }
                     }
                 }
             }
         }
-        file != null && dmEnvelope != null && !isDownloading -> {
+        file != null && dmEnvelope != null && !isDownloading && !downloadPaused -> {
             {
-                pendingDownload = PendingFileDownload(
+                AttachmentDownloadNotifier.beginDownload(
                     messageId = messageId,
                     fileIndex = fileIndex,
-                    file = file,
-                    envelope = dmEnvelope,
-                    currentUserId = currentUserId,
                     clientMessageId = clientMessageId,
-                    messageLabel = messageLabel,
+                    mirrorAsFileAttachment = true,
                 )
-                launchDestinationPicker(filename, mimeType)
+                scope.launch {
+                    val ok = DmFileDownloader.downloadToCache(
+                        messageId = messageId,
+                        fileIndex = fileIndex,
+                        file = file,
+                        envelope = dmEnvelope,
+                        currentUserId = currentUserId,
+                        clientMessageId = clientMessageId,
+                        messageLabel = messageLabel,
+                    )
+                    if (ok) {
+                        cacheUri = DecryptedFileCache.getCached(messageId, fileIndex, clientMessageId)
+                        AttachmentDownloadNotifier.clearProgress(
+                            messageId = messageId,
+                            fileIndex = fileIndex,
+                            clientMessageId = clientMessageId,
+                            mirrorAsFileAttachment = true,
+                        )
+                    }
+                }
             }
         }
         else -> null
     }
 
-  ExpressiveFileAttachmentRow(
-        filename = filename,
-        sizeBytes = sizeBytes,
-        onClick = onRowClick,
-        isAuthor = isAuthor,
-        isUploading = showWavy,
-        uploadProgress = when {
-            isUploading -> uploadProgress
-            isDownloading -> downloadProgress
-            else -> null
-        },
-        isDownloaded = isDownloaded,
-        modifier = modifier,
-    )
-}
+    val enableRowClick = onRowClick != null &&
+        (openableLocalUri != null || !showWavy || downloadPaused)
 
-private data class PendingFileDownload(
-    val messageId: Int,
-    val fileIndex: Int,
-    val file: DmFile,
-    val envelope: DmEnvelope,
-    val currentUserId: Int?,
-    val clientMessageId: String?,
-    val messageLabel: String?,
-)
+    val onCancelProgress: (() -> Unit)? = when {
+        isUploading && onCancelUpload != null -> onCancelUpload
+        isDownloading || showPausedProgress -> {
+            {
+                val storageKey = DownloadedFileRegistry.storageKey(
+                    messageId = messageId,
+                    fileIndex = fileIndex,
+                    clientMessageId = clientMessageId,
+                )
+                scope.launch {
+                    AttachmentDownloadNotifier.cancelDownload(
+                        messageId = messageId,
+                        fileIndex = fileIndex,
+                        clientMessageId = clientMessageId,
+                        mirrorAsFileAttachment = true,
+                    )
+                    AttachmentDownloadScheduler.cancel(storageKey)
+                }
+            }
+        }
+        else -> null
+    }
+
+    val failedLabel = when (uploadError) {
+        UPLOAD_ERROR_FILE_TOO_LARGE -> stringResource(Res.string.attachment_upload_failed_too_large)
+        null, "" -> null
+        else -> stringResource(Res.string.attachment_upload_failed)
+    }
+    val retryText = stringResource(Res.string.attachment_retry)
+    val retryCd = stringResource(Res.string.cd_attachment_upload_retry)
+    val headlineColor = if (isAuthor) Color.White else MaterialTheme.colorScheme.onSurface
+
+    Box(modifier = modifier.widthIn(max = 280.dp)) {
+        ExpressiveFileAttachmentRow(
+            filename = filename,
+            sizeBytes = sizeBytes,
+            onClick = onRowClick,
+            enableClick = enableRowClick,
+            isAuthor = isAuthor,
+            isUploading = showProgressing,
+            uploadProgress = when {
+                isUploading && showProgressing -> displayUploadProgress
+                isDownloading || showPausedProgress -> downloadProgress ?: 0
+                else -> null
+            },
+            isDownloaded = showAsDownloadedIcon,
+            onCancelProgress = onCancelProgress,
+        )
+        if (uploadFailed && failedLabel != null && onRetryUpload != null) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.35f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                ) {
+                    Text(
+                        text = failedLabel,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = headlineColor,
+                    )
+                    TextButton(
+                        onClick = onRetryUpload,
+                        modifier = Modifier.semantics { contentDescription = retryCd },
+                    ) {
+                        Text(text = retryText, color = headlineColor)
+                    }
+                }
+            }
+        }
+    }
+}

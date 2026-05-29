@@ -23,6 +23,7 @@ private data class PersistedOptimisticOutboundPayload(
     @SerialName("pendingFileUri") val pendingFileUri: String? = null,
     @SerialName("pendingFilename") val pendingFilename: String? = null,
     @SerialName("uploadJobId") val uploadJobId: String? = null,
+    @SerialName("fileSizes") val fileSizes: List<Long>? = null,
 )
 
 @Serializable
@@ -62,6 +63,7 @@ fun encodeOptimisticOutboundMessage(message: Message): String {
             pendingFileUri = pendingUri,
             pendingFilename = message.pendingFilename?.trim()?.takeIf { it.isNotEmpty() },
             uploadJobId = message.uploadJobId?.trim()?.takeIf { it.isNotEmpty() },
+            fileSizes = message.fileSizes,
         ),
     )
 }
@@ -140,6 +142,7 @@ fun parseDmMessageContent(plaintext: String): ParsedDmMessageContent {
                     pendingFileUri = payload.pendingFileUri?.takeIf { it.isNotBlank() },
                     pendingFilename = payload.pendingFilename?.takeIf { it.isNotBlank() },
                     uploadJobId = payload.uploadJobId?.takeIf { it.isNotBlank() },
+                    fileSizes = payload.fileSizes,
                 )
             }.getOrElse {
                 ParsedDmMessageContent(text = plaintext)

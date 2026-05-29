@@ -52,15 +52,16 @@ suspend fun decryptEnvelope(envelope: DmEnvelope, currentUserId: Int?): String {
 }
 
 /**
- * Decrypt a DM file attachment. Fetches encrypted bytes, unwraps file MEK, decrypts.
+ * Decrypt a DM file attachment to [outputPath]: streams download + decrypt without holding the full blob in RAM.
  */
-suspend fun decryptFile(
+suspend fun decryptFileToPath(
     file: ru.fromchat.api.DmFile,
     envelope: DmEnvelope,
     currentUserId: Int?,
+    outputPath: String,
     downloadResumeKey: String? = null,
     onDownloadProgress: ((Int) -> Unit)? = null,
-): ByteArray {
+): Long {
     val wrappedMekB64 = file.wrappedMekB64
         ?: envelope.files?.find { it.path == file.path }?.wrappedMekB64
         ?: envelope.wrappedMekB64
@@ -71,17 +72,28 @@ suspend fun decryptFile(
 
     val mek = unwrapMek(wrappedMekB64, envelope, currentUserId)
     ru.fromchat.core.Logger.d("DmCrypto", "fetchEncryptedFile path=${file.path}")
-    val encryptedBytes = if (downloadResumeKey != null) {
-        ru.fromchat.api.ApiClient.fetchEncryptedFileResumable(
-            path = file.path,
-            resumeKey = downloadResumeKey,
-            onProgress = onDownloadProgress,
-        )
-    } else {
-        ru.fromchat.api.ApiClient.fetchEncryptedFile(file.path)
-    }
-    if (encryptedBytes.isEmpty()) {
+    val encryptedOnDisk = ru.fromchat.api.ApiClient.fetchEncryptedFileResumable(
+        path = file.path,
+        resumeKey = downloadResumeKey,
+        onProgress = onDownloadProgress,
+    )
+    if (encryptedOnDisk.sizeBytes <= 0L) {
         throw IllegalArgumentException("Encrypted file is empty: ${file.path}")
     }
-    return DmCrypto.decryptAesGcm(nonceB64, encryptedBytes, mek)
+    return try {
+        val decryptedSize = DmCrypto.decryptAesGcmFileToPath(
+            ivB64 = nonceB64,
+            encryptedFilePath = encryptedOnDisk.path,
+            mek = mek,
+            outputPath = outputPath,
+        )
+        if (decryptedSize <= 0L) {
+            throw IllegalArgumentException("Decrypted file is empty: ${file.path}")
+        }
+        decryptedSize
+    } finally {
+        if (downloadResumeKey == null) {
+            com.pr0gramm3r101.utils.files.PlatformFileSystem.delete(encryptedOnDisk.path)
+        }
+    }
 }

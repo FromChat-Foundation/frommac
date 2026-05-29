@@ -8,6 +8,7 @@ import ru.fromchat.core.cache.stageOutboundFileForUpload
 data class StagedOutboundPreview(
     val stagedUri: String,
     val aspectRatio: Float?,
+    val sizeBytes: Long = 0L,
 )
 
 /**
@@ -37,7 +38,7 @@ suspend fun prepareOutboundImageForSend(
     val decodeTarget = previewSeedDecodeSize(aspectRatio)
     LocalDecodedImageCache.loadFull(storageKey, staged.uri, decodeTarget)
 
-    StagedOutboundPreview(stagedUri = staged.uri, aspectRatio = aspectRatio)
+    StagedOutboundPreview(stagedUri = staged.uri, aspectRatio = aspectRatio, sizeBytes = staged.sizeBytes)
 }
 
 /** High-quality seed decode before the tile is measured (refined when laid out). */

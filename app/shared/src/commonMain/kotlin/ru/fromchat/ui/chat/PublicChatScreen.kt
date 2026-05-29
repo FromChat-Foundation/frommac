@@ -60,6 +60,6 @@ fun PublicChatScreen(
         scrollToMessageId = scrollToMessageId,
         sharedTransitionScope = sharedTransitionScope,
         animatedVisibilityScope = animatedContentScope,
-        sharedAvatarKey = "public-general-chat"
+        sharedAvatarKey = null,
     )
 }

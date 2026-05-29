@@ -18,6 +18,15 @@ object PlatformFileSystem {
         expectWriteBytes(path, bytes)
     }
 
+    /** Appends [bytes] to the file at [path], creating it when missing. */
+    fun appendBytes(path: String, bytes: ByteArray) {
+        if (bytes.isEmpty()) return
+        expectAppendBytes(path, bytes)
+    }
+
+    /** Size in bytes, or 0 when the file does not exist. */
+    fun fileSize(path: String): Long = expectFileSize(path)
+
     /**
      * Deletes the file at [path]. No-op if the file does not exist.
      */
@@ -31,6 +40,10 @@ object PlatformFileSystem {
     fun deleteFilesWithPrefix(dirPath: String, namePrefix: String) {
         expectDeleteFilesWithPrefix(dirPath, namePrefix)
     }
+
+    /** Returns filenames (not paths) in [dirPath], or empty if the directory is missing. */
+    fun listFileNamesInDirectory(dirPath: String): List<String> =
+        expectListFileNamesInDirectory(dirPath)
 
     /**
      * Returns the platform-specific application cache directory path.
@@ -51,7 +64,10 @@ object PlatformFileSystem {
 
 internal expect fun expectExists(path: String): Boolean
 internal expect fun expectWriteBytes(path: String, bytes: ByteArray)
+internal expect fun expectAppendBytes(path: String, bytes: ByteArray)
+internal expect fun expectFileSize(path: String): Long
 internal expect fun expectDelete(path: String)
 internal expect fun expectDeleteFilesWithPrefix(dirPath: String, namePrefix: String)
+internal expect fun expectListFileNamesInDirectory(dirPath: String): List<String>
 internal expect fun expectGetAppCacheDirectory(): String
 internal expect fun expectEnsureDirectory(path: String)
