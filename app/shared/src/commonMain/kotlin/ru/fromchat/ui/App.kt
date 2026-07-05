@@ -65,12 +65,14 @@ import ru.fromchat.api.local.cache.CacheContext
 import ru.fromchat.api.local.cache.ensureFromChatCacheGeneration
 import ru.fromchat.api.local.db.store.ProfileCache
 import ru.fromchat.api.local.db.store.UserStatusStore
+import ru.fromchat.api.local.messages.DmInboxCoordinator
 import ru.fromchat.api.local.send.OutgoingMessageCoordinator
 import ru.fromchat.api.schema.websocket.WebSocketMessage
 import ru.fromchat.api.schema.websocket.types.WebSocketUpdatesData
 import ru.fromchat.config.ServerConfig
 import ru.fromchat.legal.DocumentScreen
 import ru.fromchat.legal.DocumentType
+import ru.fromchat.notifications.NotificationLaunchCoordinator
 import ru.fromchat.ui.auth.AuthScreen
 import ru.fromchat.ui.calls.CallOverlay
 import ru.fromchat.ui.chat.panels.dm.DmChatRoute
@@ -167,15 +169,13 @@ private fun handlePresenceEvent(message: WebSocketMessage) {
         "suspended", "unsuspended", "account_deleted" -> handleAccountLifecycleEvent(message)
         "statusUpdate" -> message.data?.jsonObject?.let(::handlePresenceStatus)
         "dmTyping", "stopDmTyping" -> message.data?.jsonObject?.let { handlePresenceTyping(message.type, it) }
+        "dmNew", "dmDeleted", "dmEdited" -> DmInboxCoordinator.handleMessage(message)
         "call_signaling" -> CallStore.onWebSocketMessage(message)
         "updates" -> {
             val data = message.data ?: return
             val updates = ApiClient.json.decodeFromJsonElement<WebSocketUpdatesData>(data)
             updates.updates.forEach { update ->
-                when (update.type) {
-                    "suspended", "unsuspended", "account_deleted" -> handleAccountLifecycleEvent(update)
-                    else -> handlePresenceEvent(update)
-                }
+                handlePresenceEvent(WebSocketMessage(type = update.type, data = update.data))
             }
         }
     }
@@ -318,10 +318,8 @@ fun App(
                 }
             }
 
-            // Handle startup/deep-link navigation targets (notification chat/profile)
+            // Handle startup/deep-link navigation targets (profile links)
             LaunchedEffect(
-                startAtDmConversationUserId,
-                startAtPublicChat,
                 startAtProfileUserId,
                 startAtProfileUsername,
                 startDestination
@@ -329,8 +327,7 @@ fun App(
                 Logger.d(
                     "ProfileDeepLink",
                     "startup nav check: startDestination=$startDestination, startAtProfileUserId=$startAtProfileUserId, " +
-                        "startAtProfileUsername=$startAtProfileUsername, startAtDmConversationUserId=$startAtDmConversationUserId, " +
-                        "startAtPublicChat=$startAtPublicChat, scrollToMessageId=$scrollToMessageId"
+                        "startAtProfileUsername=$startAtProfileUsername"
                 )
                 if (startDestination == null || startDestination == "welcome") {
                     return@LaunchedEffect
@@ -350,23 +347,42 @@ fun App(
                             "navigating by deep link username=$trimmedUsername"
                         )
                         navController.navigate("profile/$trimmedUsername?fromDeepLink=true")
-                    } else if (startAtDmConversationUserId != null && startAtDmConversationUserId > 0) {
-                        Logger.d(
-                            "ProfileDeepLink",
-                            "navigating by notification chat route user=$startAtDmConversationUserId messageId=$scrollToMessageId"
-                        )
-                        navController.navigate(
-                            DmNav.chatRoute(
-                                otherUserId = startAtDmConversationUserId,
-                                sourceMessageId = scrollToMessageId
+                    }
+                }
+            }
+
+            LaunchedEffect(startDestination) {
+                if (startDestination == null || startDestination == "welcome") {
+                    return@LaunchedEffect
+                }
+
+                NotificationLaunchCoordinator.pendingLaunches.collect { target ->
+                    when {
+                        target.dmConversationUserId != null && target.dmConversationUserId > 0 -> {
+                            Logger.d(
+                                "NotificationLaunch",
+                                "navigating to dm user=${target.dmConversationUserId} " +
+                                    "messageId=${target.scrollToMessageId} launchId=${target.launchId}"
                             )
-                        ) {
-                            launchSingleTop = true
+                            navController.navigate(
+                                DmNav.chatRoute(
+                                    otherUserId = target.dmConversationUserId,
+                                    sourceMessageId = target.scrollToMessageId,
+                                )
+                            ) {
+                                launchSingleTop = true
+                                popUpTo("chat") { saveState = true }
+                            }
                         }
-                    } else if (startAtPublicChat && navController.currentDestination?.route != "chats/publicChat") {
-                        Logger.d("ProfileDeepLink", "navigating to public chat route")
-                        navController.navigate("chats/publicChat") {
-                            launchSingleTop = true
+
+                        target.startAtPublicChat -> {
+                            Logger.d(
+                                "NotificationLaunch",
+                                "navigating to public chat launchId=${target.launchId}"
+                            )
+                            navController.navigate(PublicChatNav.CHAT_ROUTE) {
+                                launchSingleTop = true
+                            }
                         }
                     }
                 }

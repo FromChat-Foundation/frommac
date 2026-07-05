@@ -102,10 +102,7 @@ object MessageCacheStore {
     ): ChatListPreviewState? = withContext(Dispatchers.Default) {
         val convId = conversationIdForPublic()
         val iid = instanceId()
-        val recent = db.messageDatabaseQueries
-            .selectRecentMessagesByConversation(iid, convId, limit)
-            .executeAsList()
-            .firstOrNull() ?: return@withContext null
+        val recent = resolvePreviewSourceMessageRow(iid, convId) ?: return@withContext null
         val message = enrichQueuedOutboundUi(listOf(recent.toAppMessage()), convId).firstOrNull()
             ?: return@withContext null
         buildChatListPreviewState(message, strings, ApiClient.user?.id)
@@ -239,6 +236,7 @@ object MessageCacheStore {
 
     suspend fun deleteDmMessageById(otherUserId: Int, messageId: Int) {
         deleteMessageById(conversationIdForDm(otherUserId), messageId)
+        syncDmConversationPreviewFromCache(otherUserId)
     }
 
     suspend fun deleteMessageByClientMessageId(conversationId: String, clientMessageId: String) {
@@ -308,6 +306,10 @@ object MessageCacheStore {
                 val conversationId = conversationIdForDm(conv.user.id)
                 val displayLabel = conv.user.displayName?.trim()?.takeIf { it.isNotEmpty() }
                     ?: conv.user.username.trim()
+                val localUnread = db.messageDatabaseQueries
+                    .countUnreadInboundDmMessages(iid, conversationId, conv.user.id.toLong())
+                    .executeAsOne()
+                    .toInt()
                 UpsertDmConversationRow(
                     conversationId = conversationId,
                     otherUserId = conv.user.id,
@@ -318,7 +320,7 @@ object MessageCacheStore {
                         currentUserId,
                         previewStrings,
                     ),
-                    unreadCount = conv.unreadCount,
+                    unreadCount = maxOf(conv.unreadCount, localUnread),
                     updatedAt = conv.lastMessage.timestamp,
                 )
             }
@@ -420,16 +422,34 @@ object MessageCacheStore {
         }
     }
 
-    suspend fun markDmConversationRead(otherUserId: Int) {
+    suspend fun markDmConversationReadLocally(otherUserId: Int, upToEnvelopeId: Int? = null) {
         val iid = instanceId()
         val convId = conversationIdForDm(otherUserId)
         withContext(Dispatchers.Default) {
+            if (upToEnvelopeId != null && upToEnvelopeId > 0) {
+                db.messageDatabaseQueries.markInboundDmMessagesReadUpTo(
+                    instanceId = iid,
+                    conversationId = convId,
+                    userId = otherUserId.toLong(),
+                    id = upToEnvelopeId.toLong(),
+                )
+            } else {
+                db.messageDatabaseQueries.markAllInboundDmMessagesRead(
+                    instanceId = iid,
+                    conversationId = convId,
+                    userId = otherUserId.toLong(),
+                )
+            }
+            val unreadCount = db.messageDatabaseQueries
+                .countUnreadInboundDmMessages(iid, convId, otherUserId.toLong())
+                .executeAsOne()
             db.messageDatabaseQueries.updateConversationUnreadCount(
-                unreadCount = 0L,
+                unreadCount = unreadCount,
                 instanceId = iid,
                 id = convId,
             )
         }
+        DmConversationListNotifier.notifyChanged()
     }
 
     suspend fun selectUnreadPublicMessageIds(): List<Int> {
@@ -567,6 +587,10 @@ object MessageCacheStore {
             .selectActiveDmConversationsForInstance(instanceId)
             .asFlow()
             .mapToList(Dispatchers.Default)
+        val messagesFlow = db.messageDatabaseQueries
+            .selectMessagesForInstance(instanceId)
+            .asFlow()
+            .mapToList(Dispatchers.Default)
         val pendingFlow = db.messageDatabaseQueries
             .selectAllPendingMessagesForInstance(instanceId)
             .asFlow()
@@ -575,7 +599,8 @@ object MessageCacheStore {
             .selectPendingOutboxForInstance(instanceId)
             .asFlow()
             .mapToList(Dispatchers.Default)
-        return merge(conversationsFlow, pendingFlow, outboxFlow)
+        val notifierFlow = DmConversationListNotifier.events.map { Unit }
+        return merge(conversationsFlow, messagesFlow, pendingFlow, outboxFlow, notifierFlow)
             .mapLatest { loadCachedDmConversations() }
     }
 
@@ -607,12 +632,9 @@ object MessageCacheStore {
         strings: ChatListPreviewStrings,
         currentUserId: Int?,
     ): ChatListPreviewState? {
-        val recent = db.messageDatabaseQueries
-            .selectRecentMessagesByConversation(instanceId, conversationId, 1)
-            .executeAsList()
-            .firstOrNull() ?: return null
+        val sourceRow = resolvePreviewSourceMessageRow(instanceId, conversationId) ?: return null
         val message = enrichQueuedOutboundUi(
-            listOf(recent.toAppMessage()),
+            listOf(sourceRow.toAppMessage()),
             conversationId,
         ).firstOrNull() ?: return null
         return buildChatListPreviewState(message, strings, currentUserId)
@@ -623,6 +645,25 @@ object MessageCacheStore {
                         ?.takeIf { it.isNotEmpty() },
                 )
             }
+    }
+
+    private fun resolvePreviewSourceMessageRow(
+        instanceId: String,
+        conversationId: String,
+    ): DbMessage? {
+        val latestSent = db.messageDatabaseQueries
+            .selectRecentMessagesByConversation(instanceId, conversationId, 1)
+            .executeAsList()
+            .firstOrNull()
+        val latestPending = db.messageDatabaseQueries
+            .selectLatestPendingMessageByConversation(instanceId, conversationId)
+            .executeAsOneOrNull()
+        return when {
+            latestPending == null -> latestSent
+            latestSent == null -> latestPending
+            latestPending.timestamp >= latestSent.timestamp -> latestPending
+            else -> latestSent
+        }
     }
 
     private suspend fun syncDmConversationPreviewFromCache(otherUserId: Int) {
@@ -639,10 +680,7 @@ object MessageCacheStore {
                     .executeAsOneOrNull()
                     ?: return@withContext
             }
-            val recent = db.messageDatabaseQueries
-                .selectRecentMessagesByConversation(iid, convId, 1)
-                .executeAsList()
-                .firstOrNull()
+            val recent = resolvePreviewSourceMessageRow(iid, convId)
             val previewStrings = listPreviewStrings
             val preview = previewStrings?.let { strings ->
                 recent?.toAppMessage()?.let { message ->
@@ -654,6 +692,13 @@ object MessageCacheStore {
             }
                 ?.let { truncateDmListPreview(it) }
                 ?.takeIf { it.isNotEmpty() }
+            val unreadCount = db.messageDatabaseQueries
+                .countUnreadInboundDmMessages(
+                    iid,
+                    convId,
+                    otherUserId.toLong(),
+                )
+                .executeAsOne()
             db.messageDatabaseQueries.upsertConversation(
                 instanceId = iid,
                 id = row.id,
@@ -662,12 +707,24 @@ object MessageCacheStore {
                 displayName = row.displayName,
                 lastMessageId = recent?.id ?: row.lastMessageId,
                 lastMessagePreview = preview ?: row.lastMessagePreview,
-                unreadCount = row.unreadCount,
+                unreadCount = unreadCount,
                 updatedAt = recent?.timestamp ?: row.updatedAt,
                 archived = row.archived,
             )
         }
         DmConversationListNotifier.notifyChanged()
+    }
+
+    suspend fun isInboundDmMessageRead(otherUserId: Int, envelopeId: Int): Boolean {
+        if (envelopeId <= 0) return true
+        val iid = instanceId()
+        val convId = conversationIdForDm(otherUserId)
+        return withContext(Dispatchers.Default) {
+            db.messageDatabaseQueries
+                .selectMessageById(iid, convId, envelopeId.toLong())
+                .executeAsOneOrNull()
+                ?.isRead == 1L
+        }
     }
 
     private suspend fun clearConversationMessages(conversationId: String) {

@@ -88,8 +88,18 @@ object MessageRepository {
     suspend fun ensureDmConversationRow(otherUserId: Int, displayName: String? = null) =
         MessageCacheStore.ensureDmConversationRow(otherUserId, displayName)
 
-    suspend fun markDmConversationRead(otherUserId: Int) =
-        MessageCacheStore.markDmConversationRead(otherUserId)
+    suspend fun markDmConversationRead(otherUserId: Int, upToEnvelopeId: Int? = null) {
+        runCatching { ApiClient.markDmConversationRead(otherUserId, upToEnvelopeId) }
+        MessageCacheStore.markDmConversationReadLocally(otherUserId, upToEnvelopeId)
+    }
+
+    suspend fun markDmConversationReadUpTo(otherUserId: Int, upToEnvelopeId: Int) {
+        if (upToEnvelopeId <= 0) return
+        val convId = conversationIdForDm(otherUserId)
+        val alreadyRead = MessageCacheStore.isInboundDmMessageRead(otherUserId, upToEnvelopeId)
+        if (alreadyRead) return
+        markDmConversationRead(otherUserId, upToEnvelopeId)
+    }
 
     suspend fun markPublicConversationRead() {
         val localIds = MessageCacheStore.selectUnreadPublicMessageIds()

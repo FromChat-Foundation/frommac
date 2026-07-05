@@ -81,7 +81,9 @@ object NotificationHelper {
         context,
         if (targetDmUserId != null) -messageId else messageId,
         Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_MESSAGE_ID, messageId)
             putExtra(
                 EXTRA_NOTIFICATION_CHAT_TYPE,

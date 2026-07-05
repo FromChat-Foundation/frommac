@@ -367,6 +367,8 @@
     <string name="typing_many">%1$s, %2$s и ещё %3$d печатают…</string>
     <string name="more">Ещё</string>
     <string name="unread_count">+%1$d</string>
+    <string name="unread_count_badge">%1$d</string>
+    <string name="unread_count_overflow">99+</string>
     <string name="unknown">Неизвестно</string>
 
     <!-- Удаления доступа -->

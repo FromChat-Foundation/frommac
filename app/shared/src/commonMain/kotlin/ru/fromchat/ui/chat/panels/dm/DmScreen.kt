@@ -4,24 +4,31 @@ import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
 import ru.fromchat.api.ApiClient
 import ru.fromchat.api.local.db.store.MessageRepository
+import ru.fromchat.api.local.messages.ActiveDmChatTracker
 import ru.fromchat.api.local.send.OutgoingMessageCoordinator
 import ru.fromchat.api.local.send.scheduleOutboxProcessing
 import ru.fromchat.api.local.cache.CacheContext
 import ru.fromchat.ui.chat.AvatarInfo
 import ru.fromchat.ui.chat.ChatScreen
+import ru.fromchat.ui.chat.utils.AttachmentDownloadVisibility
 
 @Composable
 fun DmScreen(
     panel: DmPanel,
+    activePeerUserId: Int,
     scrollToMessageId: Int? = null,
     modifier: Modifier = Modifier,
     onTitleClick: (() -> Unit)? = null,
@@ -34,21 +41,26 @@ fun DmScreen(
 ) {
     val currentUserId = ApiClient.user?.id
     val activeInstanceId by CacheContext.activeInstanceId.collectAsState()
-    val otherUserId = panel.getState().profileUserId
+    val peerUserId = activePeerUserId.takeIf { it > 0 } ?: panel.getState().profileUserId
 
-    LaunchedEffect(panel, activeInstanceId, otherUserId) {
+    DisposableEffect(activePeerUserId) {
+        if (activePeerUserId > 0) {
+            ActiveDmChatTracker.setActive(activePeerUserId)
+        }
+        onDispose { ActiveDmChatTracker.setActive(null) }
+    }
+
+    LaunchedEffect(panel, activeInstanceId, peerUserId) {
         if (activeInstanceId.isBlank()) return@LaunchedEffect
-        val peerId = otherUserId ?: return@LaunchedEffect
+        val peerId = peerUserId ?: return@LaunchedEffect
         if (peerId <= 0) return@LaunchedEffect
-        // Panel is retained in [DmPanelCache]; only cold-load when the list is still empty
-        // (e.g. returning from profile must not call loadMessages and flash the chat spinner).
         if (panel.getState().messages.isEmpty()) {
             panel.loadMessages()
         }
     }
 
-    LaunchedEffect(activeInstanceId, otherUserId) {
-        val peerId = otherUserId ?: return@LaunchedEffect
+    LaunchedEffect(activeInstanceId, peerUserId) {
+        val peerId = peerUserId ?: return@LaunchedEffect
         val instanceId = activeInstanceId.trim()
         if (instanceId.isBlank() || peerId <= 0) return@LaunchedEffect
         scheduleOutboxProcessing(instanceId)
@@ -57,12 +69,39 @@ fun DmScreen(
         }
     }
 
-    LaunchedEffect(panel, activeInstanceId, otherUserId) {
-        val peerId = otherUserId ?: return@LaunchedEffect
+    LaunchedEffect(panel, activeInstanceId, peerUserId) {
+        val peerId = peerUserId ?: return@LaunchedEffect
         if (activeInstanceId.isBlank() || peerId <= 0) return@LaunchedEffect
         MessageRepository.observeDmMessages(peerId).collect { rows ->
             panel.syncMessagesFromDatabase(rows)
         }
+    }
+
+    LaunchedEffect(panel, activeInstanceId, activePeerUserId, peerUserId) {
+        val peerId = activePeerUserId.takeIf { it > 0 } ?: peerUserId ?: return@LaunchedEffect
+        if (activeInstanceId.isBlank() || peerId <= 0) return@LaunchedEffect
+        combine(
+            AttachmentDownloadVisibility.visibleMessageIds,
+            snapshotFlow { panel.getState().messages },
+        ) { visibleIds, messages ->
+            visibleIds
+                .filter { id ->
+                    messages.find { it.id == id }?.user_id == peerId
+                }
+                .maxOrNull()
+        }
+            .distinctUntilChanged()
+            .collect { maxVisibleInboundId ->
+                if (
+                    maxVisibleInboundId != null &&
+                    maxVisibleInboundId > 0 &&
+                    ActiveDmChatTracker.isActive(peerId)
+                ) {
+                    withContext(Dispatchers.Default) {
+                        MessageRepository.markDmConversationReadUpTo(peerId, maxVisibleInboundId)
+                    }
+                }
+            }
     }
 
     ChatScreen(

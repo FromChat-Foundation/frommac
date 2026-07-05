@@ -16,6 +16,7 @@ import ru.fromchat.api.ApiClient
 import ru.fromchat.api.local.cache.CacheContext
 import ru.fromchat.api.local.db.store.ProfileCache
 import ru.fromchat.api.local.db.store.MessageCacheStore
+import ru.fromchat.api.local.messages.ActiveDmChatTracker
 import ru.fromchat.api.local.db.store.MessageRepository
 import ru.fromchat.api.local.messages.conversationIdForDm
 import ru.fromchat.api.local.db.parseDmMessageContent
@@ -346,8 +347,10 @@ class DmPanel(
                     mergeConfirmedOwnMessage(envelope, outcome.plaintext, outcome.isCorrupted)
                 } else {
                     val incoming = createMessage(envelope, outcome.plaintext, outcome.isCorrupted)
-                    withContext(Dispatchers.Default) {
-                        MessageCacheStore.upsertDmMessage(otherUserId, incoming)
+                    if (ActiveDmChatTracker.isActive(otherUserId)) {
+                        withContext(Dispatchers.Default) {
+                            MessageCacheStore.upsertDmMessage(otherUserId, incoming)
+                        }
                     }
                     addMessage(incoming)
                     if (envelope.replyToId != null) {
@@ -520,7 +523,10 @@ class DmPanel(
             user_id = envelope.senderId,
             content = dec.text,
             timestamp = envelope.timestamp,
-            is_read = envelope.recipientId == currentUserId,
+            is_read = when {
+                envelope.senderId == currentUserId -> true
+                else -> ActiveDmChatTracker.isActive(otherUserId)
+            },
             is_edited = false,
             username = username,
             profile_picture = null,

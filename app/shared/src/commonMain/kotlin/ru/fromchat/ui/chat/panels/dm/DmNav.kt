@@ -49,6 +49,7 @@ fun DmChatRoute(
 
     DmScreen(
         panel = panel,
+        activePeerUserId = otherUserId,
         modifier = modifier.fillMaxSize(),
         scrollToMessageId = scrollToMessageId,
         onTitleClick = {

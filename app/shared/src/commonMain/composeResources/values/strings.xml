@@ -398,6 +398,8 @@
 
     <string name="more">More</string>
     <string name="unread_count">+%1$d</string>
+    <string name="unread_count_badge">%1$d</string>
+    <string name="unread_count_overflow">99+</string>
 
     <!-- Suspension -->
     <string name="suspend_chat_banner_message">Your account was blocked</string>

@@ -28,6 +28,8 @@ import kotlinx.coroutines.launch
 import ru.fromchat.api.ApiClient
 import ru.fromchat.api.schema.messages.MessagesResponse
 import ru.fromchat.config.ServerConfig
+import ru.fromchat.notifications.NotificationLaunchCoordinator
+import ru.fromchat.notifications.NotificationLaunchTarget
 import ru.fromchat.ui.App
 import ru.fromchat.ui.chat.panels.publicchat.isPublicChatVisible
 
@@ -133,6 +135,24 @@ class MainActivity : ComponentActivity() {
         profileLookupErrorMessage = launchState.profileLookupErrorMessage
     }
 
+    private fun deliverLaunchIntent(intent: Intent?) {
+        val launchState = parseLaunchStateFromIntent(intent)
+        applyLaunchState(launchState)
+
+        val messageId = intent?.getIntExtra(EXTRA_MESSAGE_ID, -1) ?: -1
+        if (messageId == -1 || intent?.hasExtra(EXTRA_NOTIFICATION_CHAT_TYPE) != true) {
+            return
+        }
+
+        NotificationLaunchCoordinator.publish(
+            NotificationLaunchTarget(
+                dmConversationUserId = launchState.startAtDmConversationUserId,
+                scrollToMessageId = launchState.scrollToMessageId,
+                startAtPublicChat = launchState.startAtPublicChat,
+            )
+        )
+    }
+
     private fun parseProfileDeepLink(intent: Intent?): ProfileDeepLinkTarget? {
         val data: Uri = intent?.data ?: return null
         Logger.d("ProfileDeepLink", "parseProfileDeepLink intentData=${data.toString()}")
@@ -213,7 +233,7 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         enableEdgeToEdge()
 
-        applyLaunchState(parseLaunchStateFromIntent(intent))
+        deliverLaunchIntent(intent)
         setContent {
             App(
                 scrollToMessageId = scrollToMessageId,
@@ -241,7 +261,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        applyLaunchState(parseLaunchStateFromIntent(intent))
+        deliverLaunchIntent(intent)
     }
 
     override fun onPause() {

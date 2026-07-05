@@ -476,7 +476,7 @@ fun ChatsTab(
         if (activeInstanceId.isBlank()) return@LaunchedEffect
         MessageRepository.observeActiveDmConversations().collect { conversations ->
             conversations.forEach { ProfileCache.mergeFromCachedConversation(it) }
-            dmConversations = conversations
+            dmConversations = ChatListReorderController.applyOrdered(conversations)
         }
     }
 

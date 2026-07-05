@@ -1,15 +1,14 @@
 package ru.fromchat.ui.main.chats
 
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -27,6 +26,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material.icons.Icons
@@ -36,6 +36,8 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -77,12 +79,12 @@ import ru.fromchat.api.schema.user.User
 import ru.fromchat.cd_chat_preview_sending
 import ru.fromchat.cd_chat_preview_uploading
 import ru.fromchat.cd_chat_selected
-import ru.fromchat.presence_online
 import ru.fromchat.ui.chat.Avatar
 import ru.fromchat.ui.chat.ExpressiveUploadIndicator
 import ru.fromchat.ui.chat.TypingIndicator
 import ru.fromchat.ui.components.Text
-import ru.fromchat.unread_count
+import ru.fromchat.unread_count_badge
+import ru.fromchat.unread_count_overflow
 import ru.fromchat.user_fallback
 
 internal object ChatListLayout {
@@ -484,6 +486,8 @@ internal fun ChatRowAvatar(
     onPressEnd: () -> Unit,
     onLongPress: (Offset) -> Unit,
     modifier: Modifier = Modifier,
+    showOnlineIndicator: Boolean = false,
+    onlineIndicatorBorderColor: Color = MaterialTheme.colorScheme.surfaceContainerLow,
 ) {
     Box(
         modifier
@@ -508,6 +512,55 @@ internal fun ChatRowAvatar(
             displayName = displayNameForInitials,
             modifier = Modifier.fillMaxSize(),
         )
+        if (showOnlineIndicator) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(14.dp)
+                    .background(onlineIndicatorBorderColor, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape),
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+internal fun ChatUnreadBadge(
+    count: Int,
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val tonal = ButtonDefaults.filledTonalButtonColors()
+    val overflowLabel = stringResource(Res.string.unread_count_overflow)
+    val label = if (count > 99) overflowLabel else stringResource(Res.string.unread_count_badge, count)
+
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = scaleIn(animationSpec = ChatUnreadBadgeSpring) + fadeIn(animationSpec = ChatUnreadBadgeSpring),
+        exit = scaleOut(animationSpec = ChatUnreadBadgeSpring) + fadeOut(animationSpec = ChatUnreadBadgeSpring),
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = tonal.containerColor,
+            modifier = Modifier.size(24.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = tonal.contentColor,
+                    maxLines = 1,
+                )
+            }
+        }
     }
 }
 
@@ -778,36 +831,18 @@ internal fun DmConversationRowContent(
     val typingUsers = status?.typingUsernames.orEmpty()
     val isTyping = typingUsers.isNotEmpty()
     val isOnline = status?.online ?: (cached?.online == true)
-    val statusKey = when {
-        isTyping -> "typing:${typingUsers.joinToString("|")}"
-        isOnline -> "online"
-        else -> "offline"
-    }
+    val listSurfaceColor = MaterialTheme.colorScheme.surfaceContainerLow
     ListItem(
         headline = peerTitle,
         supportingSlot = {
-            AnimatedContent(
-                targetState = statusKey,
-                transitionSpec = {
-                    (slideInVertically { it / 2 } + fadeIn()) togetherWith
-                        (slideOutVertically { -it / 2 } + fadeOut())
-                },
-                label = "dm_status_${conversation.otherUserId}",
-            ) { state ->
-                when {
-                    state.startsWith("typing:") -> TypingIndicator(typingUsers = typingUsers)
-                    state == "online" -> Text(
-                        text = stringResource(Res.string.presence_online),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    else -> ChatListPreviewSupportingText(
-                        preview = preview,
-                        pendingIndicator = conversation.lastMessagePendingIndicator,
-                        uploadProgress = conversation.lastMessageUploadProgress,
-                    )
-                }
+            if (isTyping) {
+                TypingIndicator(typingUsers = typingUsers)
+            } else {
+                ChatListPreviewSupportingText(
+                    preview = preview,
+                    pendingIndicator = conversation.lastMessagePendingIndicator,
+                    uploadProgress = conversation.lastMessageUploadProgress,
+                )
             }
         },
         containerColor = Color.Transparent,
@@ -827,13 +862,16 @@ internal fun DmConversationRowContent(
                     onPressStart = onAvatarPressStart,
                     onPressEnd = onAvatarPressEnd,
                     onLongPress = onAvatarLongPress,
+                    showOnlineIndicator = isOnline,
+                    onlineIndicatorBorderColor = listSurfaceColor,
                 )
             }
         },
         trailingContent = {
-            if (conversation.unreadCount > 0 && listMode == ChatsListMode.Normal) {
-                Text(stringResource(Res.string.unread_count, conversation.unreadCount))
-            }
+            ChatUnreadBadge(
+                count = conversation.unreadCount,
+                visible = conversation.unreadCount > 0 && listMode == ChatsListMode.Normal,
+            )
         },
         bodyModifier = Modifier
             .fillMaxWidth()
@@ -940,6 +978,10 @@ internal fun ChatListPreviewSupportingText(
     }
 }
 
+internal val ChatUnreadBadgeSpring = spring<Float>(
+    dampingRatio = Spring.DampingRatioMediumBouncy,
+    stiffness = Spring.StiffnessMedium,
+)
 internal val ChatRowPressSpring = spring<Float>(
     dampingRatio = Spring.DampingRatioNoBouncy,
     stiffness = Spring.StiffnessMediumLow,

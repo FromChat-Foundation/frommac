@@ -71,6 +71,7 @@ import ru.fromchat.api.schema.messages.dm.DmConversation
 import ru.fromchat.api.schema.messages.dm.DmConversationsResponse
 import ru.fromchat.api.schema.messages.dm.DmHistoryResponse
 import ru.fromchat.api.schema.messages.dm.EditDmRequest
+import ru.fromchat.api.schema.messages.dm.DmMarkReadRequest
 import ru.fromchat.api.schema.messages.dm.SendDmFile
 import ru.fromchat.api.schema.messages.dm.SendDmRequest
 import ru.fromchat.api.schema.messages.dm.upload.DmUploadChunkRequest
@@ -625,6 +626,13 @@ object ApiClient {
             }
             .body<DmConversationsResponse>()
             .conversations
+
+    suspend fun markDmConversationRead(otherUserId: Int, upToEnvelopeId: Int? = null) {
+        http.post("${ServerConfig.apiBaseUrl}/dm/conversations/$otherUserId/read") {
+            contentType(ContentType.Application.Json)
+            setBody(DmMarkReadRequest(upToEnvelopeId = upToEnvelopeId))
+        }
+    }
 
     suspend fun searchUsers(query: String): List<User> {
         val trimmed = query.trim()
