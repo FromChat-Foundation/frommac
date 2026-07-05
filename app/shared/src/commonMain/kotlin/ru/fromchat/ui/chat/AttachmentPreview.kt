@@ -313,18 +313,25 @@ private fun ChatImageTileContent(
 
     val initialFull = remember(decryptCacheKey) { LocalDecodedImageCache.peekFull(decryptCacheKey) }
     val hadInstantFull = initialFull != null
-    val hasLocalSource = !localUri.isNullOrBlank()
+    var cachedPath by remember(decryptCacheKey) {
+        mutableStateOf(DecryptedImageCache.getCached(messageId, fileIndex, cacheClientId))
+    }
+    val diskCacheUri = cachedPath
+    val hasDiskCache = diskCacheUri != null
+    val displayLocalUri = localUri?.trim()?.takeIf { it.isNotEmpty() } ?: diskCacheUri
+    val hasLocalSource = displayLocalUri != null
     val hasServerThumb = thumbnailBase64?.isNotBlank() == true
+    val useBlurredThumbPlaceholder = hasServerThumb && !hasDiskCache
 
     var fullBitmap by remember(decryptCacheKey) {
         mutableStateOf(initialFull)
     }
-    var didRevealFull by remember(decryptCacheKey) { mutableStateOf(hadInstantFull) }
-    val thumbBlurAlpha = remember(decryptCacheKey, hasServerThumb, hasLocalSource) {
+    var didRevealFull by remember(decryptCacheKey) { mutableStateOf(hadInstantFull || hasDiskCache) }
+    val thumbBlurAlpha = remember(decryptCacheKey, useBlurredThumbPlaceholder, hasLocalSource) {
         Animatable(
             when {
-                hadInstantFull -> 0f
-                hasServerThumb || hasLocalSource -> 1f
+                hadInstantFull || hasDiskCache -> 0f
+                useBlurredThumbPlaceholder || hasLocalSource -> 1f
                 else -> 0f
             },
         )
@@ -374,19 +381,17 @@ private fun ChatImageTileContent(
         }
     }
 
-    var cachedPath by remember(decryptCacheKey) {
-        mutableStateOf(DecryptedImageCache.getCached(messageId, fileIndex, cacheClientId))
-    }
-    val thumbnailBytes = remember(thumbnailBase64) {
-        thumbnailBase64?.let { decodeAttachmentThumbnailBase64(it) }
+    val thumbnailBytes = remember(thumbnailBase64, hasDiskCache) {
+        if (hasDiskCache) null else thumbnailBase64?.let { decodeAttachmentThumbnailBase64(it) }
     }
     val thumbBitmap by produceState(
-        initialValue = LocalDecodedImageCache.peekThumb(decryptCacheKey),
+        initialValue = if (hasDiskCache) null else LocalDecodedImageCache.peekThumb(decryptCacheKey),
         decryptCacheKey,
         thumbnailBytes,
         decodeSize,
+        hasDiskCache,
     ) {
-        if (thumbnailBytes == null) {
+        if (hasDiskCache || thumbnailBytes == null) {
             value = null
             return@produceState
         }
@@ -401,14 +406,22 @@ private fun ChatImageTileContent(
     val imageContentScale = ContentScale.Fit
     val tilePlaceholderColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.42f)
 
+    LaunchedEffect(messageId, fileIndex, cacheClientId) {
+        DecryptedImageCache.getCached(messageId, fileIndex, cacheClientId)?.let { uri ->
+            if (cachedPath != uri) cachedPath = uri
+        }
+    }
+
     LaunchedEffect(
         decryptCacheKey,
         localUri,
+        diskCacheUri,
         serverFile?.path,
         messageId,
         isOutboundPending,
         cacheClientId,
         loadAttempt,
+        decodeSize,
     ) {
         AttachmentMediaLog.tileLoad(
             "load_start",
@@ -416,9 +429,11 @@ private fun ChatImageTileContent(
             "msgId" to messageId,
             "pending" to isOutboundPending,
             "localUri" to (localUri?.take(48) ?: "null"),
+            "diskCache" to (diskCacheUri?.take(48) ?: "null"),
             "target" to "${decodeSize.widthPx}x${decodeSize.heightPx}",
         )
-        val diskUri = DecryptedImageCache.getCached(messageId, fileIndex, cacheClientId)
+        val diskUri = diskCacheUri
+            ?: DecryptedImageCache.getCached(messageId, fileIndex, cacheClientId)?.also { cachedPath = it }
         val localPaths = buildList {
             localUri?.trim()?.takeIf { it.isNotEmpty() }?.let { add(it) }
             diskUri?.let { cached -> if (none { it == cached }) add(cached) }
@@ -444,12 +459,10 @@ private fun ChatImageTileContent(
                 fullBitmap = loaded
                 cachedPath = diskUri ?: localPaths.firstOrNull()
                 decryptFinished = true
-                if (thumbBitmap == null) {
-                    didRevealFull = true
-                    fullRevealAlpha.snapTo(1f)
-                    thumbBlurAlpha.snapTo(0f)
-                }
-            onFullyLoaded(true)
+                didRevealFull = true
+                fullRevealAlpha.snapTo(1f)
+                thumbBlurAlpha.snapTo(0f)
+                onFullyLoaded(true)
                 return@LaunchedEffect
             }
             AttachmentMediaLog.tileLoad(
@@ -484,11 +497,9 @@ private fun ChatImageTileContent(
                 )
                 fullBitmap = loaded
                 decryptFinished = true
-                if (thumbBitmap == null) {
-                    didRevealFull = true
-                    fullRevealAlpha.snapTo(1f)
-                    thumbBlurAlpha.snapTo(0f)
-                }
+                didRevealFull = true
+                fullRevealAlpha.snapTo(1f)
+                thumbBlurAlpha.snapTo(0f)
                 onFullyLoaded(true)
                 return@LaunchedEffect
             }
@@ -542,11 +553,9 @@ private fun ChatImageTileContent(
         )
         if (fullBitmap != null) {
             AttachmentDownloadNotifier.clearProgress(messageId, fileIndex, cacheClientId)
-            if (thumbBitmap == null) {
-                didRevealFull = true
-                fullRevealAlpha.snapTo(1f)
-                thumbBlurAlpha.snapTo(0f)
-            }
+            didRevealFull = true
+            fullRevealAlpha.snapTo(1f)
+            thumbBlurAlpha.snapTo(0f)
             onFullyLoaded(true)
         }
     }
@@ -574,15 +583,19 @@ private fun ChatImageTileContent(
         }
     }
 
-    LaunchedEffect(fullBitmap, thumbBitmap, hadInstantFull) {
+    LaunchedEffect(fullBitmap, thumbBitmap, hadInstantFull, hasDiskCache) {
         when {
             fullBitmap == null -> {
+                if (hasDiskCache) {
+                    thumbBlurAlpha.snapTo(0f)
+                    return@LaunchedEffect
+                }
                 didRevealFull = false
                 fullRevealAlpha.snapTo(0f)
                 if (thumbBitmap != null) thumbBlurAlpha.snapTo(1f)
             }
             didRevealFull -> return@LaunchedEffect
-            hadInstantFull -> {
+            hadInstantFull || hasDiskCache -> {
                 didRevealFull = true
                 fullRevealAlpha.snapTo(1f)
                 thumbBlurAlpha.snapTo(0f)
@@ -641,10 +654,10 @@ private fun ChatImageTileContent(
                 )
                 if (fullBitmap == null && hasLocalSource && !showOutboundBlurOverlay) {
                     AsyncImage(
-                        model = localUri,
-            contentDescription = null,
+                        model = displayLocalUri,
+                        contentDescription = null,
                         contentScale = imageContentScale,
-            modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize(),
                     )
                 }
                 thumbBitmap?.let { thumb ->
@@ -759,7 +772,7 @@ private fun ChatImageTileContent(
         }
         if (showOutboundBlurOverlay && outboundOverlayAlpha.value > 0.01f) {
             UploadingImageOverlay(
-                model = localUri,
+                model = localUri ?: displayLocalUri!!,
                 uploadProgress = if (isUploading || awaitingServerAck) uploadProgress else null,
                 clipShape = clipShape,
                 contentScale = imageContentScale,

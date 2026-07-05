@@ -33,6 +33,9 @@ import ru.fromchat.api.calls.CallStore
 import ru.fromchat.api.calls.CallUiState
 import ru.fromchat.api.local.db.store.ProfileCache
 import ru.fromchat.api.local.db.store.visibleDisplayName
+import ru.fromchat.ui.profile.DisplayName
+import ru.fromchat.ui.profile.effectiveVerificationStatus
+import ru.fromchat.ui.profile.resolveVerificationStatus
 import ru.fromchat.call_accept
 import ru.fromchat.call_decline
 import ru.fromchat.call_dismiss
@@ -104,10 +107,11 @@ fun CallOverlay(modifier: Modifier = Modifier) {
                     modifier = Modifier.padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
+                    DisplayName(
+                        displayName = title,
+                        verificationStatus = cached?.effectiveVerificationStatus()
+                            ?: resolveVerificationStatus(s.fromUserId),
+                        textStyle = MaterialTheme.typography.headlineSmall,
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(

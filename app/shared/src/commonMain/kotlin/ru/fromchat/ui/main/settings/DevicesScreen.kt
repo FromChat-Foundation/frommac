@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -29,11 +30,11 @@ import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.LaptopMac
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -68,12 +69,18 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
 import dev.chrisbanes.haze.rememberHazeState
+import io.ktor.client.network.sockets.ConnectTimeoutException
+import io.ktor.client.network.sockets.SocketTimeoutException
+import io.ktor.client.plugins.ClientRequestException
+import io.ktor.client.plugins.HttpRequestTimeoutException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import ru.fromchat.Res
 import ru.fromchat.api.ApiClient
+import ru.fromchat.api.local.WebSocketManager
 import ru.fromchat.api.schema.user.devices.DeviceSessionInfo
 import ru.fromchat.back
 import ru.fromchat.cancel
@@ -101,6 +108,15 @@ import ru.fromchat.ui.components.Text
 import ru.fromchat.unknown
 
 private const val DEVICE_SESSIONS_POLL_INTERVAL_MS = 15_000L
+
+private fun isUnreachableDevicesFetchError(error: Throwable): Boolean = when (error) {
+    is TimeoutCancellationException,
+    is HttpRequestTimeoutException,
+    is SocketTimeoutException,
+    is ConnectTimeoutException -> true
+    is ClientRequestException -> error.response.status.value !in 400..499
+    else -> true
+}
 
 private fun enrichDevicesList(list: List<DeviceSessionInfo>): List<DeviceSessionInfo> {
     val currentIndex = list.indexOfFirst { it.current }
@@ -368,25 +384,40 @@ fun DevicesScreen(onBack: () -> Unit) {
     }
 
     suspend fun fetchDevices() {
-        refreshing = true
+        if (!WebSocketManager.isConnected) {
+            if (devices.isEmpty()) refreshing = true
+            return
+        }
+
+        val hadContent = devices.isNotEmpty()
+        if (hadContent) refreshing = true
 
         runCatching { ApiClient.listDevices() }
             .onSuccess { list ->
                 Settings.writeDeviceSessionsCache(list)
                 devices = enrichDevicesList(list)
+                refreshing = false
             }
-            .onFailure {
-                snackbarHostState.showSnackbar(errUnexpected)
+            .onFailure { error ->
+                if (isUnreachableDevicesFetchError(error)) {
+                    refreshing = devices.isEmpty()
+                } else {
+                    refreshing = false
+                    snackbarHostState.showSnackbar(errUnexpected)
+                }
             }
-
-        refreshing = false
     }
 
     LaunchedEffect(Unit) {
-        fetchDevices()
         while (isActive) {
-            delay(DEVICE_SESSIONS_POLL_INTERVAL_MS)
+            if (!WebSocketManager.isConnected) {
+                if (devices.isEmpty()) refreshing = true
+                delay(1_000)
+                continue
+            }
+
             fetchDevices()
+            delay(DEVICE_SESSIONS_POLL_INTERVAL_MS)
         }
     }
 
@@ -432,6 +463,18 @@ fun DevicesScreen(onBack: () -> Unit) {
             val current = mutable.firstOrNull { it.current }
             current?.let { mutable.remove(it) }
             current to mutable
+        }
+
+        if (devices.isEmpty() && refreshing) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentAlignment = Alignment.Center,
+            ) {
+                LoadingIndicator(modifier = Modifier.padding(24.dp))
+            }
+            return@Scaffold
         }
 
         LazyColumn(
@@ -538,7 +581,7 @@ fun DevicesScreen(onBack: () -> Unit) {
                             .padding(vertical = 16.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        LoadingIndicator(modifier = Modifier.padding(24.dp))
                     }
                 }
             }

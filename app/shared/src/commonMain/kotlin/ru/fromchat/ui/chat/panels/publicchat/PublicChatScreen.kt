@@ -44,9 +44,10 @@ fun PublicChatScreen(
 
     LaunchedEffect(panel, activeInstanceId) {
         if (activeInstanceId.isBlank()) return@LaunchedEffect
-        if (panel.getState().messages.isEmpty()) {
-            panel.loadMessages()
+        withContext(Dispatchers.Default) {
+            panel.hydrateFromLocalCache()
         }
+        panel.loadMessages()
     }
 
     LaunchedEffect(activeInstanceId, online, connectionStatus) {

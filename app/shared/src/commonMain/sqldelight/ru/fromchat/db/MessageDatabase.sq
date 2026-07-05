@@ -77,6 +77,11 @@ CREATE TABLE profile_cache (
     PRIMARY KEY (instanceId, userId)
 );
 
+CREATE TABLE public_chat_profile (
+    instanceId TEXT NOT NULL PRIMARY KEY,
+    json TEXT NOT NULL
+);
+
 -- server_binding
 selectActiveInstanceIdForConfig:
 SELECT activeInstanceId FROM server_binding WHERE configKey = ?;
@@ -231,12 +236,16 @@ DELETE FROM attachment WHERE instanceId = ?;
 deleteAllProfilesForInstance:
 DELETE FROM profile_cache WHERE instanceId = ?;
 
+deletePublicChatProfileForInstance:
+DELETE FROM public_chat_profile WHERE instanceId = ?;
+
 purgeAllCache:
 DELETE FROM message;
 DELETE FROM conversation;
 DELETE FROM outbox;
 DELETE FROM attachment;
 DELETE FROM profile_cache;
+DELETE FROM public_chat_profile;
 DELETE FROM server_binding;
 DELETE FROM instance_registry;
 
@@ -360,3 +369,11 @@ DELETE FROM profile_cache WHERE instanceId = ? AND userId = ?;
 
 deleteAllProfileCache:
 DELETE FROM profile_cache;
+
+-- public chat profile
+upsertPublicChatProfile:
+INSERT OR REPLACE INTO public_chat_profile(instanceId, json)
+VALUES (?, ?);
+
+selectPublicChatProfile:
+SELECT json FROM public_chat_profile WHERE instanceId = ?;

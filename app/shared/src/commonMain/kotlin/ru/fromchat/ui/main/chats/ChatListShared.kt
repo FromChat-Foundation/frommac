@@ -80,6 +80,8 @@ import ru.fromchat.cd_chat_preview_sending
 import ru.fromchat.cd_chat_preview_uploading
 import ru.fromchat.cd_chat_selected
 import ru.fromchat.ui.chat.Avatar
+import ru.fromchat.ui.profile.DisplayName
+import ru.fromchat.ui.profile.resolveVerificationStatus
 import ru.fromchat.ui.chat.ExpressiveUploadIndicator
 import ru.fromchat.ui.chat.TypingIndicator
 import ru.fromchat.ui.components.Text
@@ -112,6 +114,18 @@ private val ChatListCategoryMargin = PaddingValues(
     top = 16.dp,
     bottom = 20.dp,
 )
+
+@Composable
+internal fun ChatListHeadlineWithBadge(
+    title: String,
+    userId: Int,
+) {
+    DisplayName(
+        displayName = title,
+        verificationStatus = resolveVerificationStatus(userId),
+        textStyle = MaterialTheme.typography.bodyLarge,
+    )
+}
 
 @Composable
 internal fun ChatListItemSpacer() {
@@ -165,7 +179,7 @@ internal fun ChatConversationsList(
     onRowPositioned: (lazyIndex: Int, offset: Offset, size: IntSize) -> Unit,
 ) {
     val scrollBlocked = contextMenuState.isOverlayActive
-    val showPublicChat = listFilter == ChatListFilter.Active
+    val showPublicChat = listFilter == ChatListFilter.Active && !publicChatTitle.isNullOrBlank()
     val groupCount = (if (showPublicChat) 1 else 0) + conversations.size
 
     LazyColumn(
@@ -394,6 +408,7 @@ internal fun SearchConversationsList(
                         ) {
                             ListItem(
                                 headline = peerTitle,
+                                headlineSlot = { ChatListHeadlineWithBadge(peerTitle, user.id) },
                                 supportingText = username,
                                 containerColor = Color.Transparent,
                                 position = position,
@@ -703,11 +718,7 @@ internal fun PublicChatRowContent(
                 )
             }
         },
-        trailingContent = {
-            if (publicChatTitle == null) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-            }
-        },
+        trailingContent = {},
         bodyModifier = Modifier
             .fillMaxWidth()
             .fillMaxHeight(),
@@ -834,6 +845,7 @@ internal fun DmConversationRowContent(
     val listSurfaceColor = MaterialTheme.colorScheme.surfaceContainerLow
     ListItem(
         headline = peerTitle,
+        headlineSlot = { ChatListHeadlineWithBadge(peerTitle, conversation.otherUserId) },
         supportingSlot = {
             if (isTyping) {
                 TypingIndicator(typingUsers = typingUsers)

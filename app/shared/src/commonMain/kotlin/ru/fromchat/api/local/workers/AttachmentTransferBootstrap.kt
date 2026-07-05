@@ -13,6 +13,7 @@ import ru.fromchat.api.local.send.OutgoingMessageCoordinator
 import ru.fromchat.api.local.send.scheduleOutboxProcessing
 import ru.fromchat.api.local.cache.CacheContext
 import ru.fromchat.api.local.cache.repairInterruptedUploadArtifacts
+import ru.fromchat.api.PublicChatProfileSync
 import ru.fromchat.api.instance.applyCachedSessionInstanceIfAvailable
 import ru.fromchat.api.instance.scheduleSessionInstanceNetworkRefresh
 
@@ -34,6 +35,7 @@ object AttachmentTransferBootstrap {
         AttachmentDownloadNotifier.hydrateFromDisk()
         if (ApiClient.token.isNullOrEmpty()) return
         applyCachedSessionInstanceIfAvailable()
+        PublicChatProfileSync.ensureStarted()
         resumeAttachmentsForActiveInstance()
         scheduleSessionInstanceNetworkRefresh()
     }

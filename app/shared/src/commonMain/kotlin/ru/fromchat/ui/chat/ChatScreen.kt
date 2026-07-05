@@ -41,8 +41,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.pr0gramm3r101.utils.resetFocus
 import com.pr0gramm3r101.utils.supportClipboardManagerImpl
 import dev.chrisbanes.haze.HazeProgressive
 import dev.chrisbanes.haze.hazeEffect
@@ -151,6 +154,8 @@ fun ChatScreen(
     val saveMessageFile = rememberSaveMessageFile { /* best-effort */ }
     val haptic = rememberHapticFeedback()
     val navController = LocalNavController.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     val profileUserId = panelState.profileUserId
     val hazeState = rememberHazeState(
         blurEnabled = !(panelState.isLoading && panelState.messages.isEmpty())
@@ -173,9 +178,8 @@ fun ChatScreen(
     }
 
     val subtitleKey = when {
-        !online -> "connecting"
         connectionStatus == ConnectionStatus.UPDATING -> "updating"
-        connectionStatus != ConnectionStatus.CONNECTED -> "connecting"
+        !online || (connectionStatus == ConnectionStatus.CONNECTING && !WebSocketManager.isConnected) -> "connecting"
         currentTypingUsers.isNotEmpty() -> "typing"
         panel.usesPublicGroupSubtitle -> {
             if (panelState.publicGroupMetaLoading || panelState.publicGroupMemberCount == null) {
@@ -716,7 +720,10 @@ fun ChatScreen(
                                     } else {
                                         null
                                     },
-                                onImageClick = { msg, idx -> expandedImage = msg to idx },
+                                onImageClick = { msg, idx ->
+                                    resetFocus(keyboardController, focusManager)
+                                    expandedImage = msg to idx
+                                },
                                 onImageBounds = { key, rect ->
                                     imageThumbBounds[key] = rect
                                 },

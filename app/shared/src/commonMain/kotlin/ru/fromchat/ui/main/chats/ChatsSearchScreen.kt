@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -100,6 +101,8 @@ fun ChatsSearchScreen(
     val searchBarHint = stringResource(Res.string.search_title)
     var dmConversations by remember { mutableStateOf<List<CachedConversation>>(emptyList()) }
     var remoteUsers by remember { mutableStateOf<List<User>>(emptyList()) }
+    var isSearchInFlight by remember { mutableStateOf(false) }
+    var lastCompletedSearchQuery by remember { mutableStateOf<String?>(null) }
     val statusSubscriptionScope = rememberCoroutineScope()
     var subscribedDmUserIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -131,27 +134,39 @@ fun ChatsSearchScreen(
     }
 
     val searchUiState = when {
-        searchText.isBlank() -> SearchScreenState.EmptyQuery
-        searchResults.isEmpty() -> SearchScreenState.NotFound
-        else -> SearchScreenState.Results
+        searchText.isBlank() || searchQuery.length < 2 -> SearchScreenState.EmptyQuery
+        searchResults.isNotEmpty() -> SearchScreenState.Results
+        isSearchInFlight || lastCompletedSearchQuery != searchQuery -> SearchScreenState.Loading
+        else -> SearchScreenState.NotFound
     }
     LaunchedEffect(searchQuery) {
         if (searchQuery.length < 2) {
             remoteUsers = emptyList()
+            isSearchInFlight = false
+            lastCompletedSearchQuery = null
             return@LaunchedEffect
         }
+        isSearchInFlight = true
         delay(300)
         val querySnapshot = searchQuery
-        runCatching {
-            ApiClient.searchUsers(querySnapshot)
-        }.onSuccess { users ->
+        if (querySnapshot != searchText.trim().lowercase().trimStart('@')) {
+            return@LaunchedEffect
+        }
+        try {
+            val users = ApiClient.searchUsers(querySnapshot)
             if (querySnapshot == searchText.trim().lowercase().trimStart('@')) {
                 users.forEach { ProfileCache.mergeFromDmUser(it) }
                 remoteUsers = users
+                lastCompletedSearchQuery = querySnapshot
             }
-        }.onFailure {
+        } catch (_: Throwable) {
             if (querySnapshot == searchText.trim().lowercase().trimStart('@')) {
                 remoteUsers = emptyList()
+                lastCompletedSearchQuery = querySnapshot
+            }
+        } finally {
+            if (querySnapshot == searchText.trim().lowercase().trimStart('@')) {
+                isSearchInFlight = false
             }
         }
     }
@@ -272,10 +287,19 @@ fun ChatsSearchScreen(
                         )
                     }
 
+                    SearchScreenState.Loading -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+
                     SearchScreenState.NotFound -> {
                         SearchScreenInfo(
-                                title = stringResource(Res.string.search_not_found),
-                                subtitle = stringResource(Res.string.search_not_found_message),
+                            title = stringResource(Res.string.search_not_found),
+                            subtitle = stringResource(Res.string.search_not_found_message),
                             showSearchIcon = false
                         )
                     }
@@ -328,8 +352,9 @@ private sealed interface SearchResult {
 
 private enum class SearchScreenState {
     EmptyQuery,
+    Loading,
     NotFound,
-    Results
+    Results,
 }
 
 @Composable

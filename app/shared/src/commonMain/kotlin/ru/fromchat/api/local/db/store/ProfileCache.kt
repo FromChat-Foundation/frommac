@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.withLock
 import ru.fromchat.api.schema.messages.Message
 import ru.fromchat.api.schema.user.User
 import ru.fromchat.api.schema.user.profile.UserProfile
+import ru.fromchat.api.schema.user.profile.VerificationStatus
 import ru.fromchat.api.local.cache.CacheContext
 import kotlin.concurrent.Volatile
 
@@ -61,6 +62,7 @@ object ProfileCache {
         username: String? = null,
         displayName: String? = null,
         profilePicture: String? = null,
+        verificationStatus: VerificationStatus? = null,
     ) {
         if (id <= 0) return
         val existing = get(id)
@@ -86,6 +88,7 @@ object ProfileCache {
                 lastSeen = existing?.lastSeen,
                 createdAt = existing?.createdAt,
                 verified = existing?.verified,
+                verificationStatus = verificationStatus ?: existing?.verificationStatus,
                 suspended = existing?.suspended,
                 suspensionReason = existing?.suspensionReason,
                 deleted = existing?.deleted,
@@ -163,7 +166,8 @@ object ProfileCache {
                 online = user.online,
                 lastSeen = user.last_seen.takeIf { it.isNotBlank() } ?: existing?.lastSeen,
                 createdAt = user.created_at.takeIf { it.isNotBlank() } ?: existing?.createdAt,
-                verified = existing?.verified,
+                verified = user.verified ?: existing?.verified,
+                verificationStatus = user.verificationStatus ?: existing?.verificationStatus,
                 suspended = existing?.suspended,
                 suspensionReason = existing?.suspensionReason,
                 deleted = existing?.deleted,
@@ -192,7 +196,8 @@ object ProfileCache {
                 online = existing?.online ?: false,
                 lastSeen = existing?.lastSeen,
                 createdAt = existing?.createdAt,
-                verified = existing?.verified,
+                verified = message.verified ?: existing?.verified,
+                verificationStatus = message.verificationStatus ?: existing?.verificationStatus,
                 suspended = existing?.suspended,
                 suspensionReason = existing?.suspensionReason,
                 deleted = existing?.deleted,

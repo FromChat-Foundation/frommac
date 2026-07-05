@@ -416,6 +416,7 @@ private fun recreateMessageDatabaseSchema(driver: SqlDriver) {
     "DROP TABLE IF EXISTS attachment__migrate",
     "DROP TABLE IF EXISTS outbox",
     "DROP TABLE IF EXISTS profile_cache",
+    "DROP TABLE IF EXISTS public_chat_profile",
     "DROP TABLE IF EXISTS conversation",
     "DROP TABLE IF EXISTS conversation__migrate",
     "DROP TABLE IF EXISTS server_binding",

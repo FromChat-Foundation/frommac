@@ -9,12 +9,14 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import ru.fromchat.Logger
 import ru.fromchat.api.ApiClient
+import ru.fromchat.api.local.cache.CacheContext
 import ru.fromchat.api.local.cache.DecryptedImageCache
 import ru.fromchat.api.local.db.store.MessageCacheStore
 import ru.fromchat.api.local.db.store.PublicChatProfileCache
 import ru.fromchat.api.local.db.store.MessageRepository
 import ru.fromchat.api.local.messages.GENERAL_PUBLIC_GROUP_ID
 import ru.fromchat.api.local.messages.conversationIdForGroup
+import ru.fromchat.api.local.messages.sortMessagesForChatDisplay
 import ru.fromchat.api.local.send.OutgoingMessageCoordinator
 import ru.fromchat.api.schema.chats.publicchat.PublicChatProfile
 import ru.fromchat.api.schema.messages.Message
@@ -40,7 +42,7 @@ class PublicChatPanel(
     scope = scope
 ) {
     private val typingHandler = PublicChatTypingHandler(scope)
-    private var messagesLoaded = false
+    private var networkHistoryLoaded = false
 
     /**
      * Whether replacing the list would change **structure or message body** (content / edited).
@@ -68,17 +70,30 @@ class PublicChatPanel(
         get() = true
 
     init {
-        val cachedProfile = PublicChatProfileCache.profile
-        if (cachedProfile != null) {
-            applyPublicChatProfile(cachedProfile)
-        } else {
-            updateState {
+        val instanceId = CacheContext.activeInstanceId.value.trim()
+        if (instanceId.isNotEmpty()) {
+            PublicChatProfileCache.hydrateFromDiskImmediate(instanceId)
+        }
+        PublicChatProfileCache.profile?.let { applyPublicChatProfile(it) }
+            ?: updateState {
                 it.copy(
                     title = "",
                     titleAvatar = null,
                     publicGroupMetaLoading = true,
                     publicGroupMemberCount = null,
                 )
+            }
+        if (instanceId.isNotEmpty()) {
+            val cached = runCatching {
+                MessageRepository.loadRecentPublicMessagesImmediate(limit = 128)
+            }.getOrDefault(emptyList())
+            if (cached.isNotEmpty()) {
+                updateState { currentState ->
+                    currentState.copy(
+                        messages = sortMessagesForChatDisplay(cached),
+                        isLoading = false,
+                    )
+                }
             }
         }
         scope.launch {
@@ -87,17 +102,52 @@ class PublicChatPanel(
                 updateState { it.copy(typingUsers = users.filter { it.userId != currentUserId }) }
             }
         }
-        scope.launch(Dispatchers.Default) {
-            runCatching { ApiClient.getPublicChatProfile() }
-                .onSuccess { profile ->
-                    PublicChatProfileCache.put(profile)
+        scope.launch {
+            PublicChatProfileCache.profileState.collect { profile ->
+                if (profile != null) {
                     applyPublicChatProfile(profile)
                 }
-                .onFailure {
-                    if (cachedProfile == null) {
-                        updateState { s -> s.copy(publicGroupMetaLoading = false) }
-                    }
-                }
+            }
+        }
+        scope.launch(Dispatchers.Default) {
+            runCatching { PublicChatProfileCache.hydrateFromDisk() }
+            PublicChatProfileCache.profile?.let { applyPublicChatProfile(it) }
+            if (_state.messages.isEmpty()) {
+                hydrateMessagesFromLocalCache()
+            }
+        }
+    }
+
+    /** Shown when server profile is unavailable but the chat list already has a localized title. */
+    fun applyFallbackTitle(title: String) {
+        val trimmed = title.trim()
+        if (trimmed.isEmpty() || _state.title.isNotBlank()) return
+        updateState { s ->
+            s.copy(
+                title = trimmed,
+                titleAvatar = s.titleAvatar ?: AvatarInfo(displayName = trimmed, profilePictureUrl = null),
+            )
+        }
+    }
+
+    suspend fun hydrateFromLocalCache() {
+        hydrateMessagesFromLocalCache()
+        runCatching { PublicChatProfileCache.hydrateFromDisk() }
+        PublicChatProfileCache.profile?.let { applyPublicChatProfile(it) }
+    }
+
+    private suspend fun hydrateMessagesFromLocalCache() {
+        val cached = withContext(Dispatchers.Default) {
+            runCatching { MessageRepository.loadRecentPublicMessagesImmediate(limit = 128) }
+                .getOrDefault(emptyList())
+        }
+        if (cached.isEmpty()) return
+        withContext(Dispatchers.Main) {
+            batchStateUpdates {
+                clearMessages()
+                addMessages(cached)
+                setLoading(false)
+            }
         }
     }
 
@@ -184,31 +234,18 @@ class PublicChatPanel(
     }
 
     override suspend fun loadMessages() {
-        if (messagesLoaded) return
+        hydrateMessagesFromLocalCache()
+        if (networkHistoryLoaded) return
+        networkHistoryLoaded = true
 
-        messagesLoaded = true
-
-        // 1) Read cache off main first. Do NOT setLoading(true) before this: that forced an extra
-        //    frame (spinner + msgs=0) and a second heavy recomposition before the cached list applied.
-        val cached = withContext(Dispatchers.Default) {
-            // Bounded read: public conversation can accumulate many rows; SQLDelight is thin — the cost is SQLite I/O.
-            runCatching { MessageCacheStore.loadRecentPublicMessages(limit = 128) }.getOrDefault(emptyList())
-        }
-        if (cached.isNotEmpty()) {
-            withContext(Dispatchers.Main) {
-                batchStateUpdates {
-                    clearMessages()
-                    addMessages(cached)
-                    setLoading(false)
-                }
-            }
-        } else {
+        val cached = _state.messages
+        if (cached.isEmpty()) {
             withContext(Dispatchers.Main) {
                 setLoading(true)
             }
         }
 
-        // 2) Refresh from network; this may be fast or slow, but runs entirely off main.
+        // Refresh from network; this may be fast or slow, but runs entirely off main.
         val responseResult = withContext(Dispatchers.Default) {
             runCatching { ApiClient.getMessages(limit = 50) }
         }

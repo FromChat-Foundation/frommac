@@ -96,6 +96,42 @@ object MessageCacheStore {
     suspend fun loadRecentPublicMessages(limit: Long): List<Message> =
         loadRecentMessages(conversationIdForPublic(), limit)
 
+    fun loadRecentPublicMessagesImmediate(instanceId: String, limit: Long = 128): List<Message> {
+        if (instanceId.isBlank()) return emptyList()
+        val convId = conversationIdForPublic()
+        val raw = db.messageDatabaseQueries
+            .selectRecentMessagesByConversation(instanceId, convId, limit)
+            .executeAsList()
+            .map { row: DbMessage -> row.toAppMessage() }
+            .reversed()
+        val withoutSuperseded = dropSupersededOptimisticMessages(raw, ApiClient.user?.id)
+        return sortMessagesForChatDisplay(
+            validatedOrEmpty(
+                convId,
+                dedupeMessagesByClientId(
+                    enrichQueuedOutboundUi(withoutSuperseded, convId),
+                ),
+            ),
+        )
+    }
+
+    fun loadRecentPublicChatPreviewStateImmediate(
+        instanceId: String,
+        strings: ChatListPreviewStrings,
+    ): ChatListPreviewState? {
+        if (instanceId.isBlank()) return null
+        val convId = conversationIdForPublic()
+        val recent = resolvePreviewSourceMessageRow(instanceId, convId) ?: return null
+        val message = enrichQueuedOutboundUi(listOf(recent.toAppMessage()), convId).firstOrNull()
+            ?: return null
+        return buildChatListPreviewState(message, strings, ApiClient.user?.id)
+            .let { state ->
+                state.copy(
+                    text = state.text?.trim()?.takeIf { it.isNotEmpty() },
+                )
+            }
+    }
+
     suspend fun loadRecentPublicChatPreviewState(
         strings: ChatListPreviewStrings,
         limit: Long = 1,
@@ -556,30 +592,38 @@ object MessageCacheStore {
         }
     }
 
+    fun loadCachedDmConversationsImmediate(instanceId: String): List<CachedConversation> {
+        if (instanceId.isBlank()) return emptyList()
+        return loadCachedDmConversationsRows(instanceId)
+    }
+
     suspend fun loadCachedDmConversations(): List<CachedConversation> =
         withContext(Dispatchers.Default) {
-            val iid = instanceId()
-            val previewStrings = listPreviewStrings
-            val currentUserId = ApiClient.user?.id
-            db.messageDatabaseQueries
-                .selectActiveDmConversationsForInstance(iid)
-                .executeAsList()
-                .map { row: Conversation ->
-                    val previewState = previewStrings?.let { strings ->
-                        previewStateForRecentMessage(iid, row.id, strings, currentUserId)
-                    }
-                    CachedConversation(
-                        id = row.id,
-                        otherUserId = row.otherUserId?.toInt() ?: 0,
-                        displayName = row.displayName ?: "",
-                        lastMessagePreview = previewState?.text ?: row.lastMessagePreview,
-                        lastMessagePendingIndicator = previewState?.pendingIndicator
-                            ?: ChatListPreviewPendingIndicator.None,
-                        lastMessageUploadProgress = previewState?.uploadProgress,
-                        unreadCount = row.unreadCount.toInt(),
-                    )
-                }
+            loadCachedDmConversationsRows(instanceId())
         }
+
+    private fun loadCachedDmConversationsRows(instanceId: String): List<CachedConversation> {
+        val previewStrings = listPreviewStrings
+        val currentUserId = ApiClient.user?.id
+        return db.messageDatabaseQueries
+            .selectActiveDmConversationsForInstance(instanceId)
+            .executeAsList()
+            .map { row: Conversation ->
+                val previewState = previewStrings?.let { strings ->
+                    previewStateForRecentMessage(instanceId, row.id, strings, currentUserId)
+                }
+                CachedConversation(
+                    id = row.id,
+                    otherUserId = row.otherUserId?.toInt() ?: 0,
+                    displayName = row.displayName ?: "",
+                    lastMessagePreview = previewState?.text ?: row.lastMessagePreview,
+                    lastMessagePendingIndicator = previewState?.pendingIndicator
+                        ?: ChatListPreviewPendingIndicator.None,
+                    lastMessageUploadProgress = previewState?.uploadProgress,
+                    unreadCount = row.unreadCount.toInt(),
+                )
+            }
+    }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun observeActiveDmConversations(instanceId: String): Flow<List<CachedConversation>> {
@@ -959,6 +1003,7 @@ object MessageCacheStore {
             username = usernameResolved,
             profile_picture = pictureResolved,
             verified = profile?.verified,
+            verificationStatus = profile?.verificationStatus,
             reply_to = null,
             client_message_id = clientMessageId,
             reactions = null,

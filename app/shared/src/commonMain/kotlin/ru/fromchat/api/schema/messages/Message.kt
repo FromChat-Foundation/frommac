@@ -1,7 +1,9 @@
 package ru.fromchat.api.schema.messages
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import ru.fromchat.api.schema.user.profile.VerificationStatus
 import ru.fromchat.api.schema.messages.dm.DmEnvelope
 import ru.fromchat.api.schema.messages.dm.DmFile
 import ru.fromchat.api.schema.websocket.types.ReactionData
@@ -17,6 +19,7 @@ data class Message(
     val username: String,
     val profile_picture: String? = null,
     val verified: Boolean? = null,
+    @SerialName("verification_status") val verificationStatus: VerificationStatus? = null,
     val reply_to: Message? = null,
     val client_message_id: String? = null,
     val reactions: List<ReactionData>? = null,

@@ -56,6 +56,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import ru.fromchat.AppForeground
 import ru.fromchat.Logger
 import ru.fromchat.api.DeferredStartupNetwork
+import ru.fromchat.api.PublicChatProfileSync
 import ru.fromchat.api.UpdateSyncManager
 import ru.fromchat.api.calls.CallStore
 import ru.fromchat.api.instance.bootstrapSessionOnStartup
@@ -224,6 +225,17 @@ fun App(
         }
 
         val hasToken = ApiClient.token?.isNotEmpty() == true
+
+        if (hasToken) {
+            runCatching {
+                bootstrapSessionOnStartup(
+                    hasToken = true,
+                    onLogoutRequired = { sessionLogoutRequired = true },
+                )
+            }
+            PublicChatProfileSync.ensureStarted()
+        }
+
         startDestination = when {
             hasToken && startAtDmConversationUserId != null -> "chat"
             hasToken && startAtPublicChat -> "chats/publicChat"
@@ -238,15 +250,6 @@ fun App(
         DeferredStartupNetwork.scheduleAfterUiVisible()
 
         if (!hasToken) return@LaunchedEffect
-
-        launch(Dispatchers.Default) {
-            runCatching {
-                bootstrapSessionOnStartup(
-                    hasToken = true,
-                    onLogoutRequired = { sessionLogoutRequired = true },
-                )
-            }
-        }
 
         launch(Dispatchers.Default) {
             runCatching { ProfileCache.hydrateFromDisk() }

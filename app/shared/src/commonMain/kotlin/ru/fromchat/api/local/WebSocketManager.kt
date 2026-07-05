@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
@@ -47,13 +48,16 @@ import kotlin.time.ExperimentalTime
 @OptIn(ExperimentalTime::class)
 object WebSocketManager {
     private const val TAG = "WebSocketManager"
-    private const val MIN_RECONNECT_DELAY_MS = 1_000L
-    private const val MAX_RECONNECT_DELAY_MS = 60_000L
+    private const val RECONNECT_DELAY_MS = 1_000L
     private const val NETWORK_AVAILABLE_DEBOUNCE_MS = 2_000L
+    private const val SERVER_REACHABLE_DEBOUNCE_MS = 500L
     private const val FOREGROUND_DELAY_CHUNK_MS = 200L
 
     @Volatile
     private var lastOnNetworkAvailableWallMs: Long = 0L
+
+    @Volatile
+    private var lastServerReachableNotifyWallMs: Long = 0L
 
     private val scope = CoroutineScope(Dispatchers.IO)
     private val json = Json { ignoreUnknownKeys = true }
@@ -145,10 +149,16 @@ object WebSocketManager {
         if (forceRestart) {
             connectionJob?.cancel()
             connectionJob = null
+            session?.cancel()
+            session = null
+            connecting = false
         } else {
             val existingJob = connectionJob
             if (existingJob != null && existingJob.isActive) {
                 logD("connect() ignored: connectionJob already running")
+                if (session != null) {
+                    ConnectionStateStore.onConnected()
+                }
                 return
             }
         }
@@ -156,7 +166,6 @@ object WebSocketManager {
         ConnectionStateStore.onConnecting()
 
         connectionJob = scope.launch {
-            var reconnectDelayMs = MIN_RECONNECT_DELAY_MS
             while (isActive) {
                 awaitForeground()
 
@@ -166,7 +175,7 @@ object WebSocketManager {
                 if (token.isNullOrEmpty()) {
                     logD("No auth token available; staying in CONNECTING and retrying later")
                     ConnectionStateStore.onConnecting()
-                    delayWhileForeground(MIN_RECONNECT_DELAY_MS)
+                    delayWhileForeground(RECONNECT_DELAY_MS)
                     continue
                 }
 
@@ -186,7 +195,6 @@ object WebSocketManager {
                             }
                         }
                     ) {
-                        reconnectDelayMs = MIN_RECONNECT_DELAY_MS
                         session = this
                         connecting = false
                         logD("WebSocket connected. connecting set to false")
@@ -256,17 +264,20 @@ object WebSocketManager {
                 } catch (e: Throwable) {
                     logW("An error occurred during WebSocket connection: ${e.message}", e)
                 } finally {
-                    logW("WebSocket disconnected. session set to null, connecting set to false")
-                    session = null
-                    connecting = false
-                    ConnectionStateStore.onConnecting()
+                    val isCurrentJob = connectionJob === currentCoroutineContext()[Job]
+                    if (!isCurrentJob) {
+                        logD("Stale connection job finished; skipping session cleanup")
+                    } else {
+                        logW("WebSocket disconnected. session set to null, connecting set to false")
+                        session = null
+                        connecting = false
+                        ConnectionStateStore.onConnecting()
+                    }
 
                     if (isActive) {
                         awaitForeground()
-                        logD("Reconnecting in ${reconnectDelayMs}ms...")
-                        delayWhileForeground(reconnectDelayMs)
-                        reconnectDelayMs =
-                            (reconnectDelayMs * 2).coerceAtMost(MAX_RECONNECT_DELAY_MS)
+                        logD("Reconnecting in ${RECONNECT_DELAY_MS}ms...")
+                        delayWhileForeground(RECONNECT_DELAY_MS)
                     }
                 }
             }
@@ -365,8 +376,38 @@ object WebSocketManager {
             return
         }
         lastOnNetworkAvailableWallMs = now
+        if (session != null) {
+            logD("onNetworkAvailable: already connected, flushing outbox")
+            OutgoingMessageCoordinator.onTransportReady()
+            return
+        }
         logD("onNetworkAvailable: reconnect and flush outbox")
         connect(forceRestart = true)
         OutgoingMessageCoordinator.onTransportReady()
+    }
+
+    /**
+     * Called when an authenticated HTTP request succeeds while the WebSocket is down.
+     * Restarts the reconnect loop immediately instead of waiting out exponential backoff.
+     */
+    fun onServerLikelyReachable() {
+        if (!AppForeground.isInForeground.value) return
+        if (session != null) return
+        if (ApiClient.token.isNullOrEmpty()) return
+
+        val now = Clock.System.now().toEpochMilliseconds()
+        if (now - lastServerReachableNotifyWallMs < SERVER_REACHABLE_DEBOUNCE_MS) {
+            return
+        }
+        lastServerReachableNotifyWallMs = now
+
+        val job = connectionJob
+        if (job != null && job.isActive) {
+            logD("onServerLikelyReachable: HTTP ok while WS down; restarting reconnect")
+            connect(forceRestart = true)
+        } else {
+            logD("onServerLikelyReachable: HTTP ok while WS down; starting reconnect")
+            connect()
+        }
     }
 }

@@ -84,6 +84,7 @@ import ru.fromchat.action_delete
 import ru.fromchat.action_mark_read
 import ru.fromchat.api.ApiClient
 import ru.fromchat.api.calls.CallStore
+import ru.fromchat.api.local.WebSocketManager
 import ru.fromchat.api.local.cache.CacheContext
 import ru.fromchat.api.local.db.store.CachedConversation
 import ru.fromchat.api.local.db.store.ConnectionStateStore
@@ -285,21 +286,49 @@ fun ChatsTab(
     val scope = rememberCoroutineScope()
     val connectionStatus by ConnectionStateStore.status.collectAsState()
     val online by NetworkConnectivity.isOnline.collectAsState(initial = true)
-    var dmConversations by remember { mutableStateOf<List<CachedConversation>>(emptyList()) }
-    var publicChatPreviewState by remember { mutableStateOf<ChatListPreviewState?>(null) }
-    var publicChatProfile by remember { mutableStateOf(PublicChatProfileCache.profile) }
-    val searchBarHint = stringResource(Res.string.search_title)
-    val tabListState = rememberLazyListState()
-    val statusMap by UserStatusStore.status.collectAsState()
-    var subscribedDmUserIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
-    val statusSubscriptionScope = rememberCoroutineScope()
-    val suspensionState by ApiClient.suspensionState.collectAsState()
+    val activeInstanceId by CacheContext.activeInstanceId.collectAsState()
+    var dmConversations by remember(activeInstanceId) {
+        val cached = if (activeInstanceId.isBlank()) {
+            emptyList()
+        } else {
+            runCatching { MessageRepository.loadCachedDmConversationsImmediate() }
+                .getOrDefault(emptyList())
+        }
+        cached.forEach { ProfileCache.mergeFromCachedConversation(it) }
+        mutableStateOf(ChatListReorderController.applyOrdered(cached))
+    }
     val imageEmoji = stringResource(Res.string.chat_preview_image_emoji)
     val previewStrings = ChatListPreviewStrings(
         imageEmoji = imageEmoji,
         imageOnly = stringResource(Res.string.chat_preview_image, imageEmoji),
         attachmentOnly = stringResource(Res.string.chat_preview_attachment),
     )
+    var publicChatPreviewState by remember(activeInstanceId, previewStrings.imageOnly, previewStrings.attachmentOnly) {
+        if (activeInstanceId.isBlank()) {
+            mutableStateOf<ChatListPreviewState?>(null)
+        } else {
+            runCatching { PublicChatProfileCache.hydrateFromDiskImmediate(activeInstanceId) }
+            val preview = runCatching {
+                MessageRepository.loadRecentPublicChatPreviewStateImmediate(previewStrings)
+            }.getOrNull()
+            mutableStateOf(preview)
+        }
+    }
+    val publicChatProfileFromDisk = remember(activeInstanceId) {
+        if (activeInstanceId.isBlank()) {
+            null
+        } else {
+            runCatching { PublicChatProfileCache.hydrateFromDiskImmediate(activeInstanceId) }.getOrNull()
+        }
+    }
+    val publicChatProfileFromFlow by PublicChatProfileCache.profileState.collectAsState()
+    val publicChatProfile = publicChatProfileFromFlow ?: publicChatProfileFromDisk
+    val searchBarHint = stringResource(Res.string.search_title)
+    val tabListState = rememberLazyListState()
+    val statusMap by UserStatusStore.status.collectAsState()
+    var subscribedDmUserIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    val statusSubscriptionScope = rememberCoroutineScope()
+    val suspensionState by ApiClient.suspensionState.collectAsState()
     val defaultLastMessage = stringResource(Res.string.chat_last_mesaage)
 
     LaunchedEffect(previewStrings.imageOnly, previewStrings.attachmentOnly) {
@@ -360,7 +389,9 @@ fun ChatsTab(
     fun refreshDmList() {
         scope.launch {
             runCatching {
-                dmConversations = MessageRepository.loadCachedDmConversations()
+                dmConversations = ChatListReorderController.applyOrdered(
+                    MessageRepository.loadCachedDmConversations(),
+                )
             }
         }
     }
@@ -459,14 +490,13 @@ fun ChatsTab(
     }
 
     val serverConfig by ServerConfig.serverConfig.collectAsState()
-    val activeInstanceId by CacheContext.activeInstanceId.collectAsState()
 
     LaunchedEffect(activeInstanceId, previewStrings.imageOnly, previewStrings.attachmentOnly) {
         if (activeInstanceId.isBlank()) {
             publicChatPreviewState = null
             return@LaunchedEffect
         }
-        publicChatProfile = PublicChatProfileCache.profile
+        runCatching { PublicChatProfileCache.hydrateFromDisk() }
         runCatching {
             publicChatPreviewState = MessageRepository.loadRecentPublicChatPreviewState(previewStrings)
         }
@@ -491,35 +521,23 @@ fun ChatsTab(
         if (activeInstanceId.isBlank()) return@LaunchedEffect
 
         runCatching {
-            MessageRepository.loadCachedDmConversations()
-        }.onSuccess { conversations ->
-            conversations.forEach { ProfileCache.mergeFromCachedConversation(it) }
-            dmConversations = conversations
-        }
-
-        runCatching {
             ApiClient.getDmConversations()
         }.onSuccess { conversations ->
             runCatching {
                 conversations.forEach { ProfileCache.mergeFromDmUser(it.user) }
                 MessageRepository.replaceDmConversations(conversations, previewStrings)
-                dmConversations = MessageRepository.loadCachedDmConversations()
+                dmConversations = ChatListReorderController.applyOrdered(
+                    MessageRepository.loadCachedDmConversations(),
+                )
             }
         }
 
-        publicChatProfile = PublicChatProfileCache.profile
-
-        runCatching { ApiClient.getPublicChatProfile() }
-            .onSuccess { profile ->
-                PublicChatProfileCache.put(profile)
-                publicChatProfile = profile
-            }
+        runCatching { PublicChatProfileCache.hydrateFromDisk() }
     }
 
     val titleKey = when {
-        !online -> "connecting"
         connectionStatus == ConnectionStatus.UPDATING -> "updating"
-        connectionStatus == ConnectionStatus.CONNECTING -> "connecting"
+        !online || (connectionStatus == ConnectionStatus.CONNECTING && !WebSocketManager.isConnected) -> "connecting"
         else -> "fromchat"
     }
 
@@ -529,7 +547,7 @@ fun ChatsTab(
     val selectedCountTitle = stringResource(Res.string.chats_selected_count, selectedCount)
     val suspendBannerTitle = stringResource(Res.string.suspend_chat_banner_message)
     val suspendDefaultReason = stringResource(Res.string.suspended_default_reason)
-    val publicChatTitle = publicChatProfile?.title
+    val publicChatTitle = publicChatProfile?.title?.takeIf { it.isNotBlank() }
     val publicChatLink = publicChatProfile?.let { "https://fromchat.ru/chats/${it.id}" }
     val deleteConfirmTitle = stringResource(Res.string.chat_delete_confirm_title)
     val deleteConfirmBody = stringResource(Res.string.chat_delete_confirm_body)

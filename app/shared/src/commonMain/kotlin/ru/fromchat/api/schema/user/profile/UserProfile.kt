@@ -14,6 +14,7 @@ data class UserProfile(
     @SerialName("last_seen") val lastSeen: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
     val verified: Boolean? = null,
+    @SerialName("verification_status") val verificationStatus: VerificationStatus? = null,
     val suspended: Boolean? = null,
     @SerialName("suspension_reason") val suspensionReason: String? = null,
     val deleted: Boolean? = null,

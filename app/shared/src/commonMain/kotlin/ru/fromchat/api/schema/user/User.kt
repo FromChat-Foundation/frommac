@@ -2,6 +2,7 @@ package ru.fromchat.api.schema.user
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import ru.fromchat.api.schema.user.profile.VerificationStatus
 
 @Serializable
 data class User(
@@ -14,7 +15,9 @@ data class User(
     val admin: Boolean? = null,
     val bio: String? = null,
     val profile_picture: String? = null,
+    val verified: Boolean? = null,
+    @SerialName("verification_status") val verificationStatus: VerificationStatus? = null,
     val suspended: Boolean? = null,
-    @SerialName("suspension_reason") val suspensionReason: String? = null
+    @SerialName("suspension_reason") val suspensionReason: String? = null,
 )
 

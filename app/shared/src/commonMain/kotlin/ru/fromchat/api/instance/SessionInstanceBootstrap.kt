@@ -7,8 +7,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import ru.fromchat.api.ApiClient
+import ru.fromchat.api.PublicChatProfileSync
 import ru.fromchat.api.local.db.store.InstanceRegistryStore
 import ru.fromchat.api.local.db.store.MessageRepository
+import ru.fromchat.api.local.db.store.PublicChatProfileCache
 import ru.fromchat.api.local.download.AttachmentDownloadNotifier
 import ru.fromchat.api.local.send.scheduleOutboxProcessing
 import ru.fromchat.config.Settings
@@ -32,8 +34,10 @@ private fun scheduleAttachmentResumeAfterSession() {
     }
 }
 
-private fun activateInstance(instanceId: String) {
+private suspend fun activateInstance(instanceId: String) {
     CacheContext.setActiveInstance(instanceId, ApiClient.user?.id)
+    runCatching { PublicChatProfileCache.hydrateFromDiskImmediate(instanceId) }
+    PublicChatProfileSync.ensureStarted()
     scheduleOutboxProcessing(instanceId)
     scheduleAttachmentResumeAfterSession()
     ApiClient.user?.id?.let { userId ->

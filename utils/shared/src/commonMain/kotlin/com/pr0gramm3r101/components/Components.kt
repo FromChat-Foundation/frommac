@@ -542,6 +542,7 @@ fun ListItem(
     modifier: Modifier = Modifier,
     bodyModifier: Modifier = Modifier,
     headline: String,
+    headlineSlot: (@Composable () -> Unit)? = null,
     supportingText: String? = null,
     supportingSlot: (@Composable () -> Unit)? = null,
     leadingContent: (@Composable () -> Unit)? = null,
@@ -678,7 +679,7 @@ fun ListItem(
                     }
 
                     ListItem(
-                        headlineContent = { Text(headline) },
+                        headlineContent = headlineSlot ?: { Text(headline) },
                         supportingContent = {
                             when {
                                 supportingSlot != null -> supportingSlot()

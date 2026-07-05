@@ -43,7 +43,6 @@ import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
 import ru.fromchat.api.local.db.store.PublicChatProfileCache
 import ru.fromchat.api.schema.chats.publicchat.PublicChatProfile
 import ru.fromchat.back
@@ -81,8 +80,6 @@ import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
@@ -115,6 +112,8 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import io.ktor.client.plugins.ClientRequestException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.stringResource
@@ -122,8 +121,9 @@ import ru.fromchat.Logger
 import ru.fromchat.Res
 import ru.fromchat.action_copy
 import ru.fromchat.action_edit
-import ru.fromchat.action_retry_send
 import ru.fromchat.api.ApiClient
+import ru.fromchat.api.PublicChatProfileSync
+import ru.fromchat.api.local.WebSocketManager
 import ru.fromchat.api.calls.CallStore
 import ru.fromchat.api.local.db.store.ProfileCache
 import ru.fromchat.api.local.db.store.UserStatus
@@ -148,6 +148,7 @@ import ru.fromchat.profile_load_failed
 import ru.fromchat.profile_not_found
 import ru.fromchat.profile_verified_support
 import ru.fromchat.profile_verify_prompt_support
+import ru.fromchat.ui.profile.effectiveVerificationStatus
 import ru.fromchat.ui.LocalNavController
 import ru.fromchat.ui.chat.Avatar
 import ru.fromchat.ui.chat.TypingIndicator
@@ -286,8 +287,6 @@ fun ProfileScreen(
         mutableStateOf(hasDisplayableProfile(state.profile, initialDisplayName, ownUserId))
     }
 
-    var reloadAttempt by remember(lookupKey) { mutableIntStateOf(0) }
-
     val latestUi by rememberUpdatedState(state)
 
     val backStackEntry = navController.currentBackStackEntry
@@ -309,109 +308,116 @@ fun ProfileScreen(
         }
     }
 
-    LaunchedEffect(lookupMode, lookupIdentifier, reloadAttempt) {
-        if (reloadAttempt > 0) {
-            state = latestUi.copy(isLoading = true, error = null)
+    LaunchedEffect(lookupMode, lookupIdentifier) {
+        ProfileCache.hydrateFromDisk()
+        resolveCachedProfile(targetUserId, targetUsername, ownUserId)?.let { cached ->
+            if (hasDisplayableProfile(cached, initialDisplayName, ownUserId)) {
+                state = latestUi.copy(profile = cached, isLoading = false, error = null)
+            }
         }
 
-        Logger.d(
-            "ProfileScreen",
-            "load start: mode=$lookupMode identifier=$lookupIdentifier cacheLookupId=$cacheLookupId ownUserId=$ownUserId"
-        )
-
-        try {
-            val profile = when {
-                targetUserId == null && targetUsername == null -> ApiClient.getOwnProfile()
-                targetUsername != null -> ApiClient.getProfileByUsername(targetUsername)
-                else -> ApiClient.getProfileById(targetUserId!!)
+        while (isActive) {
+            if (!WebSocketManager.isConnected) {
+                delay(1000)
+                continue
             }
 
-            if (profile.username.isBlank() && profile.displayName.isNullOrBlank()) {
-                cacheLookupId?.let { ProfileCache.evictUnusableClientPreview(it) }
+            Logger.d(
+                "ProfileScreen",
+                "load start: mode=$lookupMode identifier=$lookupIdentifier cacheLookupId=$cacheLookupId ownUserId=$ownUserId"
+            )
+
+            try {
+                val profile = when {
+                    targetUserId == null && targetUsername == null -> ApiClient.getOwnProfile()
+                    targetUsername != null -> ApiClient.getProfileByUsername(targetUsername)
+                    else -> ApiClient.getProfileById(targetUserId!!)
+                }
+
+                if (profile.username.isBlank() && profile.displayName.isNullOrBlank()) {
+                    cacheLookupId?.let { ProfileCache.evictUnusableClientPreview(it) }
+
+                    Logger.d(
+                        "ProfileScreen",
+                        "load success but blank identity for id=${profile.id}, dropping " +
+                            "as unusable preview"
+                    )
+
+                    state = latestUi.copy(
+                        profile = null,
+                        isLoading = false,
+                        error = ProfileLoadError.Generic
+                    )
+                } else {
+                    Logger.d(
+                        "ProfileScreen",
+                        "load success: mode=$lookupMode identifier=$lookupIdentifier -> " +
+                            "id=${profile.id}, username='${profile.username}', " +
+                            "display='${profile.displayName}', deleted=${profile.deleted}, " +
+                            "suspended=${profile.suspended}"
+                    )
+
+                    ProfileCache.put(profile)
+                    state = latestUi.copy(profile = profile, isLoading = false, error = null)
+                }
+            } catch (err: Exception) {
+                val fallback = resolveCachedProfile(targetUserId, targetUsername, ownUserId)
+                    ?: latestUi.profile
+                val resolvedProfile = latestUi.profile ?: fallback
+
+                if (!hasDisplayableProfile(resolvedProfile, initialDisplayName, ownUserId)) {
+                    val fallbackId = if (targetUsername != null) null else targetUserId ?: ownUserId
+                    fallbackId?.let { ProfileCache.evictUnusableClientPreview(it) }
+                }
 
                 Logger.d(
                     "ProfileScreen",
-                    "load success but blank identity for id=${profile.id}, dropping " +
-                        "as unusable preview"
+                    "load failure fallback lookup: fallbackFound=${fallback != null}"
                 )
+
+                val resolvedErrorMessage = when {
+                    err is ClientRequestException && err.response.status.value == 404 -> profileNotFound
+                    else -> profileLoadFailed
+                }
+
+                if (err is ClientRequestException) {
+                    Logger.d(
+                        "ProfileScreen",
+                        "load failed: mode=$lookupMode identifier=$lookupIdentifier " +
+                            "status=${err.response.status.value} error=${err.message}"
+                    )
+                } else {
+                    Logger.d(
+                        "ProfileScreen",
+                        "load failed: mode=$lookupMode identifier=$lookupIdentifier " +
+                            "errorType=${err::class.simpleName} message=${err.message}"
+                    )
+                }
+
+                if (
+                    showErrorAsToast &&
+                    (targetUserId != null || targetUsername != null) &&
+                    !hasDisplayableProfile(resolvedProfile, initialDisplayName, ownUserId)
+                ) {
+                    showProfileLoadErrorMessage(resolvedErrorMessage)
+                }
 
                 state = latestUi.copy(
-                    profile = null,
-                    isLoading = false,
-                    error = ProfileLoadError.Generic
-                )
-
-                return@LaunchedEffect
-            }
-
-            Logger.d(
-                "ProfileScreen",
-                "load success: mode=$lookupMode identifier=$lookupIdentifier -> " +
-                    "id=${profile.id}, username='${profile.username}', " +
-                    "display='${profile.displayName}', deleted=${profile.deleted}, " +
-                    "suspended=${profile.suspended}"
-            )
-
-            ProfileCache.put(profile)
-            state = latestUi.copy(profile = profile, isLoading = false, error = null)
-        } catch (err: Exception) {
-            val fallbackId = (
-                if (targetUsername != null) null else targetUserId ?: ownUserId
-            )?.also {
-                ProfileCache.evictUnusableClientPreview(it)
-            }
-
-            val fallback = fallbackId?.let { ProfileCache.get(it) }
-                ?: resolveCachedProfile(targetUserId, targetUsername, ownUserId)
-
-            Logger.d(
-                "ProfileScreen",
-                "load failure fallback lookup: fallbackId=$fallbackId " +
-                    "fallbackFound=${fallback != null}"
-            )
-
-            val resolvedErrorMessage = when {
-                err is ClientRequestException && err.response.status.value == 404 -> profileNotFound
-                else -> profileLoadFailed
-            }
-
-            if (err is ClientRequestException) {
-                Logger.d(
-                    "ProfileScreen",
-                    "load failed: mode=$lookupMode identifier=$lookupIdentifier " +
-                        "status=${err.response.status.value} fallbackId=$fallbackId error=${err.message}"
-                )
-            } else {
-                Logger.d(
-                    "ProfileScreen",
-                    "load failed: mode=$lookupMode identifier=$lookupIdentifier " +
-                        "errorType=${err::class.simpleName} message=${err.message}"
-                )
-            }
-
-            val resolvedProfile = latestUi.profile ?: fallback
-
-            if (
-                showErrorAsToast &&
-                (targetUserId != null || targetUsername != null) &&
-                !hasDisplayableProfile(resolvedProfile, initialDisplayName, ownUserId)
-            ) {
-                showProfileLoadErrorMessage(resolvedErrorMessage)
-            }
-
-            state = latestUi.copy(
-                error = if (!hasDisplayableProfile(resolvedProfile, initialDisplayName, ownUserId)) {
-                    if (resolvedErrorMessage == profileLoadFailed) {
-                        ProfileLoadError.Generic
+                    error = if (!hasDisplayableProfile(resolvedProfile, initialDisplayName, ownUserId)) {
+                        if (resolvedErrorMessage == profileLoadFailed) {
+                            ProfileLoadError.Generic
+                        } else {
+                            ProfileLoadError.Message(resolvedErrorMessage)
+                        }
                     } else {
-                        ProfileLoadError.Message(resolvedErrorMessage)
-                    }
-                } else {
-                    null
-                },
-                profile = resolvedProfile,
-                isLoading = false
-            )
+                        null
+                    },
+                    profile = resolvedProfile,
+                    isLoading = false
+                )
+            }
+
+            delay(1000)
         }
     }
 
@@ -427,7 +433,6 @@ fun ProfileScreen(
     val headlineVerification = stringResource(Res.string.profile_headline_verification)
     val verifiedSupport = stringResource(Res.string.profile_verified_support)
     val verifyPromptSupport = stringResource(Res.string.profile_verify_prompt_support)
-    val labelRetry = stringResource(Res.string.action_retry_send)
 
     val profile = state.profile ?: resolveCachedProfile(targetUserId, targetUsername, ownUserId)
     if (hasDisplayableProfile(profile, initialDisplayName, ownUserId)) {
@@ -435,17 +440,17 @@ fun ProfileScreen(
     }
     val statusMap by UserStatusStore.status.collectAsState()
     val lastSeenFormatStrings = rememberLastSeenFormatStrings()
-    val loadError = state.error
     val hasDisplayable = hasDisplayableProfile(profile, initialDisplayName, ownUserId)
-    val showSkeleton = !hasDisplayable && (state.isLoading || loadError != null)
+    val resolvedProfile = profile?.takeIf { hasDisplayableProfile(it, null, ownUserId) }
+    val showBodySkeleton = resolvedProfile == null
+    val showAvatarSkeleton = showBodySkeleton && !hasDisplayable
     val currentProfileUserId = targetUserId ?: ownUserId ?: profile?.id
     val displayName =
         profile?.visibleDisplayName(currentProfileUserId)
             ?: initialDisplayName?.takeIf { it.isNotBlank() }
-            ?: "?"
+            ?: profile?.username?.takeIf { it.isNotBlank() }
+            ?: ""
     val usernameForLinks = profile?.visibleUsername(currentProfileUserId)
-
-    val resolvedProfile = profile?.takeIf { !showSkeleton }
     val profileLink = resolvedProfile?.let {
         usernameForLinks?.let { name -> "https://fromchat.ru/@$name" }
             ?: "https://fromchat.ru/?u=${it.id}"
@@ -558,7 +563,7 @@ fun ProfileScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 when {
-                    showSkeleton && !hideAvatar -> {
+                    showAvatarSkeleton && !hideAvatar -> {
                         item {
                             ShimmerBox(
                                 modifier = Modifier
@@ -591,9 +596,9 @@ fun ProfileScreen(
 
                     !hideAvatar -> {
                         item {
-                            Avatar(
-                                profilePictureUrl = profile?.profilePicture,
-                                displayName = displayName,
+                                Avatar(
+                                    profilePictureUrl = profile?.profilePicture,
+                                    displayName = displayName,
                                 modifier = Modifier
                                     .padding(top = profileAvatarTop)
                                     .size(104.dp)
@@ -630,24 +635,18 @@ fun ProfileScreen(
 
                 item {
                     AnimatedContent(
-                        targetState = showSkeleton,
+                        modifier = Modifier.fillMaxWidth(),
+                        targetState = showBodySkeleton,
                         transitionSpec = {
                             fadeIn() togetherWith fadeOut()
                         },
                         label = "profile_body",
                     ) { skeleton ->
                         if (skeleton) {
-                            ProfileSkeletonBody(
-                                onRetry = if (loadError != null) {
-                                    { reloadAttempt++ }
-                                } else {
-                                    null
-                                },
-                                retryLabel = labelRetry,
-                            )
-                        } else if (resolvedProfile != null) {
+                            ProfileSkeletonBody()
+                        } else {
                             ProfileLoadedBody(
-                                resolvedProfile = resolvedProfile,
+                                resolvedProfile = resolvedProfile!!,
                                 displayName = displayName,
                                 isOwnProfile = isOwnProfile,
                                 typingUsers = typingUsers,
@@ -740,31 +739,34 @@ fun PublicChatProfileScreen(
                 profile = PublicChatProfileCache.profile,
                 isLoading = PublicChatProfileCache.profile == null,
                 error = null,
-            )
+            ),
         )
-    }
-
-    val hasShownContent = remember {
-        mutableStateOf(PublicChatProfileCache.profile != null)
     }
 
     val latestUi by rememberUpdatedState(state)
 
     LaunchedEffect(Unit) {
+        runCatching { PublicChatProfileCache.hydrateFromDisk() }
+        val diskProfile = PublicChatProfileCache.profile
+        if (diskProfile != null) {
+            state = latestUi.copy(profile = diskProfile, isLoading = false, error = null)
+        } else if (latestUi.profile == null) {
+            state = latestUi.copy(isLoading = true, error = null)
+        }
+
         try {
-            val profile = ApiClient.getPublicChatProfile()
-            PublicChatProfileCache.put(profile)
+            val profile = PublicChatProfileSync.refreshFromNetwork()
             state = latestUi.copy(profile = profile, isLoading = false, error = null)
         } catch (err: Exception) {
-            val cached = PublicChatProfileCache.profile
+            val cached = PublicChatProfileCache.profile ?: latestUi.profile
             val resolvedErrorMessage = when {
                 err is ClientRequestException && err.response.status.value == 404 -> profileNotFound
                 else -> err.message?.takeIf { it.isNotBlank() } ?: profileLoadFailed
             }
             state = latestUi.copy(
-                profile = latestUi.profile ?: cached,
+                profile = cached,
                 isLoading = false,
-                error = if (latestUi.profile == null && cached == null) {
+                error = if (cached?.title.isNullOrBlank() && initialDisplayName.isNullOrBlank()) {
                     if (resolvedErrorMessage == profileLoadFailed) {
                         PublicChatProfileLoadError.Generic
                     } else {
@@ -780,15 +782,10 @@ fun PublicChatProfileScreen(
     val hazeState = rememberHazeState()
 
     val profile = state.profile
-    if (profile != null) {
-        hasShownContent.value = true
-    }
-    val loadError = state.error
-    val showLoadingSpinner = state.isLoading && !hasShownContent.value
-    val displayName = profile?.title?.takeIf { it.isNotBlank() }
+    val resolvedProfile = profile?.takeIf { !it.title.isNullOrBlank() }
+    val displayName = resolvedProfile?.title?.takeIf { it.isNotBlank() }
         ?: initialDisplayName?.takeIf { it.isNotBlank() }
         ?: ""
-    val resolvedProfile = profile?.takeIf { loadError == null && !showLoadingSpinner }
     val profileLink = resolvedProfile?.let { "https://fromchat.ru/chats/${it.id}" }
     val profileActions = resolvedProfile?.let {
         listOf(
@@ -843,127 +840,57 @@ fun PublicChatProfileScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 when {
-                    showLoadingSpinner -> {
-                        item { Spacer(Modifier.height(profileAvatarTop + 104.dp + 12.dp)) }
+                    useSharedAvatar && displayName.isNotBlank() -> {
                         item {
-                            CircularProgressIndicator(modifier = Modifier.padding(top = 24.dp))
-                        }
-                    }
-
-                    loadError != null -> {
-                        item { Spacer(Modifier.height(profileAvatarTop + 104.dp + 12.dp)) }
-                        item {
-                            Text(
-                                text = when (loadError) {
-                                    PublicChatProfileLoadError.Generic -> profileLoadFailed
-                                    is PublicChatProfileLoadError.Message -> loadError.text
-                                },
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.padding(top = 24.dp),
-                            )
-                        }
-                    }
-
-                    resolvedProfile != null || initialDisplayName != null -> {
-                        item {
-                            if (useSharedAvatar) {
-                                with(sharedTransitionScope!!) {
-                                    Avatar(
-                                        profilePictureUrl = null,
-                                        displayName = displayName,
-                                        modifier = Modifier
-                                            .padding(top = profileAvatarTop)
-                                            .sharedElement(
-                                                rememberSharedContentState(key = sharedAvatarKey!!),
-                                                animatedVisibilityScope = animatedVisibilityScope!!,
-                                            )
-                                            .size(104.dp),
-                                    )
-                                }
-                            } else {
+                            with(sharedTransitionScope!!) {
                                 Avatar(
                                     profilePictureUrl = null,
                                     displayName = displayName,
                                     modifier = Modifier
                                         .padding(top = profileAvatarTop)
+                                        .sharedElement(
+                                            rememberSharedContentState(key = sharedAvatarKey!!),
+                                            animatedVisibilityScope = animatedVisibilityScope!!,
+                                        )
                                         .size(104.dp),
                                 )
                             }
                         }
-
                         item { Spacer(Modifier.height(12.dp)) }
+                    }
 
-                        if (resolvedProfile != null) {
-                            item {
-                                Text(
-                                    text = resolvedProfile.title,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                            }
-
-                            item { Spacer(Modifier.height(4.dp)) }
-
-                            if (showMemberCount) {
-                                item {
-                                    Text(
-                                        text = membersCountText.orEmpty(),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-
-                            item { Spacer(Modifier.height(24.dp)) }
-
-                            item {
-                                ProfileActionButtonRow(
-                                    actions = profileActions.orEmpty(),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp),
-                                )
-                            }
-
-                            if (showBio) {
-                                Category(
-                                    margin = PaddingValues(
-                                        start = 16.dp,
-                                        end = 16.dp,
-                                        top = 28.dp,
-                                        bottom = 20.dp,
-                                    ),
-                                    roundedCorners = false,
-                                ) {
-                                    item {
-                                        ListItem(
-                                            headline = headlineBio,
-                                            supportingSlot = {
-                                                ProfileBioMarkdown(
-                                                    content = resolvedProfile.bio.orEmpty(),
-                                                )
-                                            },
-                                            position = ListItemPosition.START,
-                                            groupItemCount = 1,
-                                            leadingContent = {
-                                                Icon(
-                                                    imageVector = Icons.Filled.Info,
-                                                    contentDescription = null,
-                                                    tint = listItemIconTint,
-                                                )
-                                            },
-                                            contextMenu = {
-                                                item(Icons.Rounded.ContentCopy, labelCopy) {
-                                                    scope.launch {
-                                                        clipboard.setText(resolvedProfile.bio.orEmpty())
-                                                    }
-                                                }
-                                            },
-                                        )
-                                    }
-                                }
-                            }
+                    resolvedProfile != null -> {
+                        item {
+                            Avatar(
+                                profilePictureUrl = null,
+                                displayName = displayName,
+                                modifier = Modifier
+                                    .padding(top = profileAvatarTop)
+                                    .size(104.dp),
+                            )
                         }
+                        item { Spacer(Modifier.height(12.dp)) }
+                    }
+
+                    else -> {
+                        item { Spacer(Modifier.height(profileAvatarTop)) }
+                    }
+                }
+
+                if (resolvedProfile != null) {
+                    item {
+                        PublicChatProfileLoadedBody(
+                            resolvedProfile = resolvedProfile,
+                            profileActions = profileActions.orEmpty(),
+                            showMemberCount = showMemberCount,
+                            membersCountText = membersCountText.orEmpty(),
+                            showBio = showBio,
+                            headlineBio = headlineBio,
+                            listItemIconTint = listItemIconTint,
+                            labelCopy = labelCopy,
+                            clipboard = clipboard,
+                            scope = scope,
+                        )
                     }
                 }
             }
@@ -985,6 +912,88 @@ fun PublicChatProfileScreen(
                 .padding(bottom = 16.dp)
                 .fillMaxWidth(),
         )
+    }
+}
+
+@Composable
+private fun PublicChatProfileLoadedBody(
+    resolvedProfile: PublicChatProfile,
+    profileActions: List<ProfileAction>,
+    showMemberCount: Boolean,
+    membersCountText: String,
+    showBio: Boolean,
+    headlineBio: String,
+    listItemIconTint: Color,
+    labelCopy: String,
+    clipboard: SupportClipboardManager,
+    scope: CoroutineScope,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = resolvedProfile.title,
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+
+        Spacer(Modifier.height(4.dp))
+
+        if (showMemberCount) {
+            Text(
+                text = membersCountText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        ProfileActionButtonRow(
+            actions = profileActions,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+        )
+
+        if (showBio) {
+            Category(
+                margin = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 28.dp,
+                    bottom = 20.dp,
+                ),
+                roundedCorners = false,
+            ) {
+                ListItem(
+                    headline = headlineBio,
+                    supportingSlot = {
+                        ProfileBioMarkdown(
+                            content = resolvedProfile.bio.orEmpty(),
+                        )
+                    },
+                    position = ListItemPosition.START,
+                    groupItemCount = 1,
+                    leadingContent = {
+                        Icon(
+                            imageVector = Icons.Filled.Info,
+                            contentDescription = null,
+                            tint = listItemIconTint,
+                        )
+                    },
+                    contextMenu = {
+                        item(Icons.Rounded.ContentCopy, labelCopy) {
+                            scope.launch {
+                                clipboard.setText(resolvedProfile.bio.orEmpty())
+                            }
+                        }
+                    },
+                )
+            }
+        }
     }
 }
 
@@ -1032,13 +1041,12 @@ private fun targetWeightForPress(
 
 @Composable
 private fun ProfileSkeletonBody(
-    onRetry: (() -> Unit)?,
-    retryLabel: String,
     modifier: Modifier = Modifier,
 ) {
     val barShape = RoundedCornerShape(8.dp)
     val pillShape = MaterialTheme.shapes.extraLarge
     val listBarShape = RoundedCornerShape(4.dp)
+    val skeletonRowCount = 3
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -1050,7 +1058,7 @@ private fun ProfileSkeletonBody(
                 .height(28.dp),
             shape = barShape,
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
         ShimmerBox(
             modifier = Modifier
                 .width(112.dp)
@@ -1082,65 +1090,37 @@ private fun ProfileSkeletonBody(
             ),
             roundedCorners = false,
         ) {
-            ProfileSkeletonListRow(listBarShape = listBarShape, showDivider = true)
-            ProfileSkeletonListRow(listBarShape = listBarShape, showDivider = true)
-            ProfileSkeletonListRow(listBarShape = listBarShape, showDivider = false)
-        }
-        if (onRetry != null) {
-            Spacer(Modifier.height(8.dp))
-            TextButton(onClick = onRetry) {
-                Text(
-                    text = retryLabel,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            repeat(skeletonRowCount) { index ->
+                ListItem(
+                    headline = "",
+                    headlineSlot = {
+                        ShimmerBox(
+                            modifier = Modifier
+                                .fillMaxWidth(0.38f)
+                                .height(14.dp),
+                            shape = listBarShape,
+                        )
+                    },
+                    supportingSlot = {
+                        ShimmerBox(
+                            modifier = Modifier
+                                .fillMaxWidth(0.62f)
+                                .height(12.dp),
+                            shape = listBarShape,
+                        )
+                    },
+                    leadingContent = {
+                        ShimmerBox(
+                            modifier = Modifier.size(24.dp),
+                            shape = CircleShape,
+                        )
+                    },
+                    divider = index < skeletonRowCount - 1,
+                    position = listItemPositionInGroup(index, skeletonRowCount),
+                    groupItemCount = skeletonRowCount,
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun ProfileSkeletonListRow(
-    listBarShape: RoundedCornerShape,
-    showDivider: Boolean,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ShimmerBox(
-            modifier = Modifier.size(24.dp),
-            shape = CircleShape,
-        )
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            ShimmerBox(
-                modifier = Modifier
-                    .fillMaxWidth(0.38f)
-                    .height(14.dp),
-                shape = listBarShape,
-            )
-            ShimmerBox(
-                modifier = Modifier
-                    .fillMaxWidth(0.62f)
-                    .height(12.dp),
-                shape = listBarShape,
-            )
-        }
-    }
-    if (showDivider) {
-        Spacer(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .height(1.dp)
-                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-        )
     }
 }
 
@@ -1209,8 +1189,7 @@ private fun ProfileLoadedBody(
                 )
             }
             StatusBadge(
-                verified = resolvedProfile.verified,
-                userId = resolvedProfile.id,
+                verificationStatus = resolvedProfile.effectiveVerificationStatus(),
             )
         }
 
@@ -1400,9 +1379,19 @@ private fun ProfileLoadedBody(
                                                 ApiClient.verifyUser(resolvedProfile.id)
                                             }.getOrNull()
                                         }
-                                        result?.verified?.let { newVerified ->
+                                        result?.let { response ->
                                             onProfileUpdated(
-                                                resolvedProfile.copy(verified = newVerified),
+                                                resolvedProfile.copy(
+                                                    verified = response.verified,
+                                                    verificationStatus = response.verificationStatus
+                                                        ?: response.verified.let { verified ->
+                                                            if (verified) {
+                                                                ru.fromchat.api.schema.user.profile.VerificationStatus.Verified
+                                                            } else {
+                                                                ru.fromchat.api.schema.user.profile.VerificationStatus.None
+                                                            }
+                                                        },
+                                                ),
                                             )
                                         }
                                     }

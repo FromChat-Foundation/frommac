@@ -67,6 +67,8 @@ import ru.fromchat.ui.chat.components.getReplyMessageGradient
 import ru.fromchat.ui.chat.utils.imageAspectRatioForMessage
 import ru.fromchat.ui.chat.utils.imageAttachmentKey
 import ru.fromchat.ui.components.Text
+import ru.fromchat.ui.profile.StatusBadge
+import ru.fromchat.ui.profile.resolveVerificationStatus
 
 /** True when [Message.content] is only a filename placeholder (no real caption). */
 internal fun isFilenameOnlyMessageCaption(message: Message): Boolean {
@@ -121,6 +123,7 @@ fun MessageItem(
     val editedSuffix = stringResource(Res.string.message_edited_suffix)
     val sendFailedLabel = stringResource(Res.string.message_send_failed)
     val displayUsername = messageDisplayUsername(message, currentUserId)
+    val senderVerificationStatus = resolveVerificationStatus(message.user_id, message)
     val replyRef = message.reply_to
 
     // No AnimatedVisibility here: visible=true still ran enter transitions for every item on first
@@ -342,23 +345,41 @@ fun MessageItem(
                                             onClick = onUsernameClick
                                         )
                                 ) {
-                                    Text(
-                                        text = displayUsername,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = usernameInset
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = usernameInset,
+                                    ) {
+                                        Text(
+                                            text = displayUsername,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                        StatusBadge(
+                                            verificationStatus = senderVerificationStatus,
+                                            size = 14.dp,
+                                        )
+                                    }
                                 }
                             } else {
                                 Box(modifier = usernameOutset) {
-                                    Text(
-                                        text = displayUsername,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = usernameInset
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = usernameInset,
+                                    ) {
+                                        Text(
+                                            text = displayUsername,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                        StatusBadge(
+                                            verificationStatus = senderVerificationStatus,
+                                            size = 14.dp,
+                                        )
+                                    }
                                 }
                             }
                         }

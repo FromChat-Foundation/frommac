@@ -101,7 +101,6 @@ import ru.fromchat.api.schema.user.devices.DevicesListResponse
 import ru.fromchat.api.schema.user.keys.BackupBlobRequest
 import ru.fromchat.api.schema.user.keys.BackupBlobResponse
 import ru.fromchat.api.schema.user.keys.PublicKeyResponse
-import ru.fromchat.api.schema.user.profile.SimilarityResult
 import ru.fromchat.api.schema.user.profile.UpdateProfileRequest
 import ru.fromchat.api.schema.user.profile.UpdateProfileResponse
 import ru.fromchat.api.schema.user.profile.UserProfile
@@ -249,6 +248,10 @@ object ApiClient {
                 }
                 if (response.status.value == 403) {
                     handleForbiddenAsPotentialSuspension(response)
+                }
+
+                if (response.status.value in 200..299 && token != null) {
+                    WebSocketManager.onServerLikelyReachable()
                 }
 
                 if (response.status.value !in (200..299) + 101) {
@@ -600,15 +603,6 @@ object ApiClient {
             }
             .body<RegisteredUserCountResponse>()
             .count
-
-    suspend fun checkSimilarity(userId: Int): SimilarityResult? =
-        runCatching {
-            http
-                .get("${ServerConfig.apiBaseUrl}/user/check-similarity/$userId") {
-                    contentType(ContentType.Application.Json)
-                }
-                .body<SimilarityResult>()
-        }.getOrNull()
 
     suspend fun verifyUser(userId: Int): VerifyResponse? =
         runCatching {

@@ -99,6 +99,7 @@ object InstanceRegistryStore {
                 db.messageDatabaseQueries.deleteAllOutboxForInstance(id)
                 db.messageDatabaseQueries.deleteAllAttachmentsForInstance(id)
                 db.messageDatabaseQueries.deleteAllProfilesForInstance(id)
+                db.messageDatabaseQueries.deletePublicChatProfileForInstance(id)
             }
         }
     }

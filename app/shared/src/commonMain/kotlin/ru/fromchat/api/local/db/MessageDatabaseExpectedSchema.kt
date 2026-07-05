@@ -12,6 +12,7 @@ internal object MessageDatabaseExpectedSchema {
         "attachment",
         "outbox",
         "profile_cache",
+        "public_chat_profile",
     )
 
     val tableCreateSql: Map<String, String> = mapOf(
@@ -99,6 +100,12 @@ internal object MessageDatabaseExpectedSchema {
                 PRIMARY KEY (instanceId, userId)
             )
         """.trimIndent(),
+        "public_chat_profile" to """
+            CREATE TABLE public_chat_profile (
+                instanceId TEXT NOT NULL PRIMARY KEY,
+                json TEXT NOT NULL
+            )
+        """.trimIndent(),
     )
 
     /** Columns that must exist; value is ALTER TABLE suffix when addable without rebuild. */
@@ -166,6 +173,10 @@ internal object MessageDatabaseExpectedSchema {
         "profile_cache" to mapOf(
             "instanceId" to "TEXT NOT NULL",
             "userId" to "INTEGER NOT NULL",
+            "json" to "TEXT NOT NULL",
+        ),
+        "public_chat_profile" to mapOf(
+            "instanceId" to "TEXT NOT NULL",
             "json" to "TEXT NOT NULL",
         ),
     )

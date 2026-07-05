@@ -43,7 +43,6 @@ kotlin {
             implementation(libs.compose.material3)
             implementation(libs.compose.ui)
             implementation(libs.compose.components.resources)
-            implementation(libs.compose.ui.tooling.preview)
             implementation(libs.constraintlayout)
             implementation(libs.navigation.compose)
             implementation(libs.compose.materialIconsExtended)
@@ -59,7 +58,6 @@ kotlin {
 
             // Ktor - force version 2.3.12 to avoid conflicts with Coil 3's Ktor 3
             implementation(libs.ktor.client.core)
-            implementation(libs.ktor.client.cio)
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.client.serialization.kotlinx.json)
             implementation(libs.ktor.client.websockets)

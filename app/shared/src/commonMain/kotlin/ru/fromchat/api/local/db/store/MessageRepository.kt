@@ -31,10 +31,24 @@ object MessageRepository {
     suspend fun loadRecentPublicMessages(limit: Long): List<Message> =
         MessageCacheStore.loadRecentPublicMessages(limit)
 
+    fun loadRecentPublicMessagesImmediate(limit: Long = 128): List<Message> {
+        val instanceId = CacheContext.activeInstanceId.value.trim()
+        if (instanceId.isBlank()) return emptyList()
+        return MessageCacheStore.loadRecentPublicMessagesImmediate(instanceId, limit)
+    }
+
     suspend fun loadRecentPublicChatPreviewState(
         strings: ChatListPreviewStrings,
         limit: Long = 1,
     ): ChatListPreviewState? = MessageCacheStore.loadRecentPublicChatPreviewState(strings, limit)
+
+    fun loadRecentPublicChatPreviewStateImmediate(
+        strings: ChatListPreviewStrings,
+    ): ChatListPreviewState? {
+        val instanceId = CacheContext.activeInstanceId.value.trim()
+        if (instanceId.isBlank()) return null
+        return MessageCacheStore.loadRecentPublicChatPreviewStateImmediate(instanceId, strings)
+    }
 
     fun observePublicChatPreviewState(strings: ChatListPreviewStrings): Flow<ChatListPreviewState?> =
         MessageCacheStore.observePublicChatPreviewState(activeInstance(), strings)
@@ -84,6 +98,12 @@ object MessageRepository {
 
     suspend fun loadCachedDmConversations(): List<CachedConversation> =
         MessageCacheStore.loadCachedDmConversations()
+
+    fun loadCachedDmConversationsImmediate(): List<CachedConversation> {
+        val instanceId = CacheContext.activeInstanceId.value.trim()
+        if (instanceId.isBlank()) return emptyList()
+        return MessageCacheStore.loadCachedDmConversationsImmediate(instanceId)
+    }
 
     suspend fun ensureDmConversationRow(otherUserId: Int, displayName: String? = null) =
         MessageCacheStore.ensureDmConversationRow(otherUserId, displayName)

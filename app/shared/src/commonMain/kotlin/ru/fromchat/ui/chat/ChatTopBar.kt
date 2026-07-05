@@ -64,6 +64,8 @@ import ru.fromchat.chat_members_count
 import ru.fromchat.ui.chat.utils.TypingUser
 import ru.fromchat.ui.components.ConnectingEllipsis
 import ru.fromchat.ui.components.Text
+import ru.fromchat.ui.profile.StatusBadge
+import ru.fromchat.ui.profile.resolveVerificationStatus
 import com.pr0gramm3r101.utils.scaleOnPress
 import kotlin.math.PI
 import kotlin.math.tan
@@ -169,12 +171,26 @@ fun ChatTopBarInner(
                 .padding(horizontal = 4.dp, vertical = 2.dp),
             horizontalAlignment = Alignment.Start,
         ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                profileUserId?.let { userId ->
+                    val status = resolveVerificationStatus(userId)
+                    if (status != null) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        StatusBadge(
+                            verificationStatus = status,
+                            size = 18.dp,
+                        )
+                    }
+                }
+            }
 
             AnimatedContent(
                 targetState = subtitleKey,
