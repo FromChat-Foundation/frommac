@@ -101,7 +101,7 @@ object UpdateSyncManager {
         val startSeq = _lastSeq.value
 
         try {
-            Logger.d("UpdateSyncManager", "Running gap detection from lastSeq=$startSeq")
+            Logger.i("UpdateSyncManager", "Running gap detection from lastSeq=$startSeq")
             if (startSeq > 0) {
                 ConnectionStateStore.onUpdating(start = true)
             }
@@ -124,7 +124,7 @@ object UpdateSyncManager {
             if (data != null) {
                 runCatching {
                     val parsed = ApiClient.json.decodeFromJsonElement(GetUpdatesResponse.serializer(), data)
-                    Logger.d(
+                    Logger.i(
                         "UpdateSyncManager",
                         "Gap detection result: status=${parsed.status}, lastSeq=${parsed.lastSeq}, missed=${parsed.missedCount}"
                     )

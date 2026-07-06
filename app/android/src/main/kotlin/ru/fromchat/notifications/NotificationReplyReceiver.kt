@@ -3,13 +3,13 @@ package ru.fromchat.notifications
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import androidx.core.app.RemoteInput
 import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
+import ru.fromchat.Logger
 import ru.fromchat.api.ApiClient
 
 private const val EXTRA_REPLY_CHAT_TYPE = "notification_reply_chat_type"
@@ -21,9 +21,9 @@ private const val CHAT_TYPE_DM = "dm"
 @OptIn(DelicateCoroutinesApi::class)
 class NotificationReplyReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        Log.e(
+        Logger.d(
             "NotificationReply",
-            "onReceive called action=${intent.action} extras=${intent.extras?.keySet()?.joinToString()}"
+            "onReceive action=${intent.action} extras=${intent.extras?.keySet()?.joinToString()}",
         )
 
         val replyText = RemoteInput.getResultsFromIntent(intent)?.let { input ->
@@ -33,12 +33,12 @@ class NotificationReplyReceiver : BroadcastReceiver() {
             ?.toString()
             ?.trim()
             ?: run {
-                Log.w("NotificationReply", "No inline reply text found")
+                Logger.w("NotificationReply", "No inline reply text found")
                 return
             }
 
         if (replyText.isBlank()) {
-            Log.w("NotificationReply", "Inline reply text is blank")
+            Logger.w("NotificationReply", "Inline reply text is blank")
             return
         }
 
@@ -46,7 +46,7 @@ class NotificationReplyReceiver : BroadcastReceiver() {
         val targetDmUserId = intent.getIntExtra(EXTRA_REPLY_DM_USER_ID, -1)
         val parentMessageId = intent.getIntExtra(EXTRA_REPLY_PARENT_MESSAGE_ID, -1).takeIf { it > 0 }
 
-        Log.d("NotificationReply", "Received reply for $chatType: $replyText")
+        Logger.d("NotificationReply", "Received reply for $chatType (length=${replyText.length})")
         NotificationManagerCompat.from(context).cancel(NotificationHelper.summaryNotificationId())
 
         GlobalScope.launch(Dispatchers.IO) {
@@ -64,7 +64,7 @@ class NotificationReplyReceiver : BroadcastReceiver() {
                                 replyToId = parentMessageId
                             )
                         } else {
-                            Log.w("NotificationReply", "Received DM reply without recipient id; skipping send")
+                            Logger.w("NotificationReply", "Received DM reply without recipient id; skipping send")
                         }
                     }
 
@@ -73,9 +73,9 @@ class NotificationReplyReceiver : BroadcastReceiver() {
                         replyToId = parentMessageId
                     )
                 }
-                Log.d("NotificationReply", "Reply dispatch attempt completed for $chatType")
+                Logger.i("NotificationReply", "Reply dispatch attempt completed for $chatType")
             } catch (e: Exception) {
-                Log.w("NotificationReply", "Failed to send reply", e)
+                Logger.w("NotificationReply", "Failed to send reply", e)
             }
         }
     }

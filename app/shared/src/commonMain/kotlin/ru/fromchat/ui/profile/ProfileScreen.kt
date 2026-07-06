@@ -112,6 +112,8 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import io.ktor.client.plugins.ClientRequestException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -316,18 +318,18 @@ fun ProfileScreen(
             }
         }
 
-        while (isActive) {
-            if (!WebSocketManager.isConnected) {
-                delay(1000)
-                continue
-            }
+        var loadedSuccessfully = false
+
+        suspend fun attemptLoad(): Boolean {
+            if (loadedSuccessfully || !currentCoroutineContext().isActive) return loadedSuccessfully
+            if (!WebSocketManager.isConnected) return false
 
             Logger.d(
                 "ProfileScreen",
                 "load start: mode=$lookupMode identifier=$lookupIdentifier cacheLookupId=$cacheLookupId ownUserId=$ownUserId"
             )
 
-            try {
+            return try {
                 val profile = when {
                     targetUserId == null && targetUsername == null -> ApiClient.getOwnProfile()
                     targetUsername != null -> ApiClient.getProfileByUsername(targetUsername)
@@ -348,6 +350,7 @@ fun ProfileScreen(
                         isLoading = false,
                         error = ProfileLoadError.Generic
                     )
+                    false
                 } else {
                     Logger.d(
                         "ProfileScreen",
@@ -359,6 +362,8 @@ fun ProfileScreen(
 
                     ProfileCache.put(profile)
                     state = latestUi.copy(profile = profile, isLoading = false, error = null)
+                    loadedSuccessfully = true
+                    true
                 }
             } catch (err: Exception) {
                 val fallback = resolveCachedProfile(targetUserId, targetUsername, ownUserId)
@@ -415,9 +420,20 @@ fun ProfileScreen(
                     profile = resolvedProfile,
                     isLoading = false
                 )
+                false
             }
+        }
 
-            delay(1000)
+        if (attemptLoad()) return@LaunchedEffect
+
+        val onReconnect: suspend () -> Unit = {
+            attemptLoad()
+        }
+        WebSocketManager.addSessionReadyHandler(onReconnect)
+        try {
+            awaitCancellation()
+        } finally {
+            WebSocketManager.removeSessionReadyHandler(onReconnect)
         }
     }
 

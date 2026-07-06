@@ -90,7 +90,7 @@ actual suspend fun openCachedAttachmentFile(
 
         try {
             context.startActivity(primary)
-            Logger.d(tag, "startActivity ok mime=$resolvedMime uri=$contentUri name=$nameForMime")
+            Logger.i(tag, "startActivity ok mime=$resolvedMime name=$nameForMime")
         } catch (t: Throwable) {
             Logger.w(tag, "startActivity primary failed, falling back mime=$resolvedMime uri=$contentUri", t)
             context.startActivity(fallback)

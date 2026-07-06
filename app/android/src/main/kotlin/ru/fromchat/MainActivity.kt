@@ -4,7 +4,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -200,10 +199,10 @@ class MainActivity : ComponentActivity() {
                         contentType(ContentType.Application.Json)
                         setBody(mapOf("messageIds" to messageIds))
                     }
-                    Log.d("MainActivity", "Marked ${messageIds.size} messages as read: $messageIds")
+                    Logger.i("MainActivity", "Marked ${messageIds.size} messages as read")
                 }
             } catch (e: Exception) {
-                Log.e("MainActivity", "Failed to mark messages as read", e)
+                Logger.e("MainActivity", "Failed to mark messages as read", e)
             }
         }
     }

@@ -1,6 +1,5 @@
 package ru.fromchat.fcm
 
-import android.util.Log
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.pr0gramm3r101.utils.settings.settings
@@ -8,6 +7,7 @@ import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
+import ru.fromchat.Logger
 import ru.fromchat.api.ApiClient
 import ru.fromchat.notifications.NotificationHelper
 import ru.fromchat.api.uploadPendingFcmTokenIfAvailable
@@ -15,8 +15,11 @@ import ru.fromchat.api.uploadPendingFcmTokenIfAvailable
 @OptIn(DelicateCoroutinesApi::class)
 class FromChatFirebaseMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
-        Log.i("FromChatFCM", "onMessageReceived: from=${remoteMessage.from} dataSize=${remoteMessage.data.size}")
-        Log.d("FromChatFCM", "onMessageReceived data=${remoteMessage.data}")
+        Logger.i(
+            "FromChatFCM",
+            "onMessageReceived: from=${remoteMessage.from} dataSize=${remoteMessage.data.size}",
+        )
+        Logger.d("FromChatFCM", "onMessageReceived data=${remoteMessage.data}")
 
         GlobalScope.launch(Dispatchers.IO) {
             try {
@@ -30,13 +33,16 @@ class FromChatFirebaseMessagingService : FirebaseMessagingService() {
                 val messageType = pushData["type"] ?: "public_message"
                 val isDirectMessage = messageType.equals("dm", ignoreCase = true)
                 if (ApiClient.token.isNullOrBlank()) {
-                    Log.w("FromChatFCM", "No auth token in memory; loading persisted data before handling push")
+                    Logger.w("FromChatFCM", "No auth token in memory; loading persisted data before handling push")
                     ApiClient.loadPersistedData()
-                    Log.d("FromChatFCM", "Token loaded from storage for push sync: hasToken=${ApiClient.token?.isNotBlank() ?: false}")
+                    Logger.d(
+                        "FromChatFCM",
+                        "Token loaded from storage for push sync: hasToken=${ApiClient.token?.isNotBlank() ?: false}",
+                    )
                 }
                 val currentUserId = settings.getInt("current_user_id", -1)
                 if (senderId != null && senderId == currentUserId) {
-                    Log.d("FromChatFCM", "Skipping push for own message senderId=$senderId")
+                    Logger.d("FromChatFCM", "Skipping push for own message senderId=$senderId")
                     return@launch
                 }
                 if (!isDirectMessage && (title.isNotBlank() || body.isNotBlank())) {
@@ -61,25 +67,23 @@ class FromChatFirebaseMessagingService : FirebaseMessagingService() {
                     NotificationHelper.fetchAndNotify(applicationContext)
                 }
             } catch (e: Exception) {
-                Log.e("FromChatFCM", "onMessageReceived error: ${e.message}", e)
+                Logger.e("FromChatFCM", "onMessageReceived error: ${e.message}", e)
             }
         }
     }
 
     override fun onNewToken(token: String) {
-        Log.d("FromChatFCM", "onNewToken: $token")
+        Logger.i("FromChatFCM", "onNewToken received (...${token.takeLast(8)})")
         GlobalScope.launch(Dispatchers.IO) {
             try {
                 settings.putString("pending_fcm_token", token)
                 uploadPendingFcmTokenIfAvailable()
-                Log.d("FromChatFCM", "FCM token queued or uploaded for this app instance")
+                Logger.i("FromChatFCM", "FCM token queued or uploaded for this app instance")
             } catch (e: Exception) {
-                Log.e("FromChatFCM", "onNewToken upload error: ${e.message}", e)
+                Logger.e("FromChatFCM", "onNewToken upload error: ${e.message}", e)
             }
 
             super.onNewToken(token)
         }
     }
 }
-
-

@@ -14,4 +14,6 @@ object SettingsRoutes {
     const val AccountDeleteFlow = "settings/account/delete"
     const val ServerConfig = "serverConfig"
     const val About = "about"
+    const val Logs = "settings/logs"
+    const val LogFiles = "settings/logs/files"
 }

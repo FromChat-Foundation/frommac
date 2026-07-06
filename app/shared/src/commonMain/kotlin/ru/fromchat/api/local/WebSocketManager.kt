@@ -105,6 +105,10 @@ object WebSocketManager {
         if (AppForeground.isInForeground.value) Logger.d(TAG, message)
     }
 
+    private fun logI(message: String) {
+        if (AppForeground.isInForeground.value) Logger.i(TAG, message)
+    }
+
     private fun logW(message: String, throwable: Throwable? = null) {
         if (AppForeground.isInForeground.value) Logger.w(TAG, message, throwable)
     }
@@ -197,7 +201,7 @@ object WebSocketManager {
                     ) {
                         session = this
                         connecting = false
-                        logD("WebSocket connected. connecting set to false")
+                        logI("WebSocket connected. connecting set to false")
                         ConnectionStateStore.onConnected()
 
                         logD("Sending WebSocket ping for authentication")
@@ -342,7 +346,7 @@ object WebSocketManager {
 
     fun shutdown() {
         disconnect()
-        logD("shutdown() called. Cancelling scope.")
+        logI("shutdown() called. Cancelling scope.")
         scope.cancel()
     }
 
@@ -353,7 +357,7 @@ object WebSocketManager {
         session?.cancel()
         session = null
         connecting = false
-        logD("Disconnected. session set to null, connecting set to false, connectionJob set to null")
+        logI("Disconnected. session set to null, connecting set to false, connectionJob set to null")
     }
 
     fun onNetworkLost() {

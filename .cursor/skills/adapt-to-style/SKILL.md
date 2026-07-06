@@ -5,7 +5,7 @@ description: Adapts Kotlin/Compose code (diff, single file, or multiple files) t
 
 # Adapt to style
 
-Refactor target code to match [`CODE_STYLE.md`](../../../CODE_STYLE.md) at the repository root. **Do not change behavior.**
+Refactor target code to match `[CODE_STYLE.md](../../../CODE_STYLE.md)` at the repository root. **Do not change behavior.**
 
 ## Writing new code
 
@@ -14,6 +14,8 @@ When implementing features (not a style-only pass):
 1. Read `CODE_STYLE.md` before writing.
 2. Follow it from the start — inline single-use bindings, idiomatic Kotlin, match neighboring files.
 3. **Do not ask the user style questions** — apply the guide and use your judgment.
+
+If the user used this skill in a prompt asking to implement/fix something, you should just adhere to the coding style.
 
 ## Style adaptation pass
 
@@ -46,13 +48,11 @@ When unsure how to refactor something:
 
 1. Create or append to `.cursor/code_style_progress_<YYYYMMDD-HHmm>.md` (use current local time).
 2. For each item:
-
-   ```markdown
+  ```markdown
    ## relative/path/File.kt
    - Unsure: [specific construct and why]
    - Chosen approach: [what you did for now]
-   ```
-
+  ```
 3. Continue refactoring — do not block on open questions.
 4. After all files are done, **re-read** the progress file and ask the user the listed questions.
 
@@ -82,3 +82,4 @@ Summarize:
 - Files touched and main style changes.
 - Any entries from the progress file that need user decisions.
 - Build result.
+

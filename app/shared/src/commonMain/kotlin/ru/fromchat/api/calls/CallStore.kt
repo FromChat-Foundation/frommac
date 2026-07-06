@@ -111,7 +111,7 @@ object CallStore {
         }
         val fromUsername = obj["fromUsername"]?.jsonPrimitive?.contentOrNull.orEmpty()
         if (_ui.value is CallUiState.InCall) return
-        Logger.d(TAG, "call_signaling → Incoming from=$fromUserId room=$roomName")
+        Logger.i(TAG, "call_signaling → Incoming from=$fromUserId room=$roomName")
         _ui.value = CallUiState.Incoming(
             fromUserId = fromUserId,
             fromUsername = fromUsername,
@@ -126,7 +126,7 @@ object CallStore {
             Logger.d(TAG, "startOutgoingCall ignored (calls disabled: set calls port in server settings)")
             return
         }
-        Logger.d(TAG, "startOutgoingCall(peer=$peerUserId)")
+        Logger.i(TAG, "startOutgoingCall(peer=$peerUserId)")
         scope.launch {
             // Stay on underlying UI until the room is ready; do not block on callee answering.
             runCatching {
@@ -146,7 +146,7 @@ object CallStore {
                     )
                 }
             }.onSuccess { session ->
-                Logger.d(
+                Logger.i(
                     TAG,
                     "startOutgoingCall → InCall peer=${session.peerUserId} room=${session.roomName}",
                 )
@@ -183,7 +183,7 @@ object CallStore {
                     )
                 }
             }.onSuccess { session ->
-                Logger.d(
+                Logger.i(
                     TAG,
                     "acceptIncoming → InCall peer=${session.peerUserId} room=${session.roomName}",
                 )

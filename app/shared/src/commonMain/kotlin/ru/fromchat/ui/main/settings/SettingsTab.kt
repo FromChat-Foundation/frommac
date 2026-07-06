@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -40,7 +41,9 @@ import ru.fromchat.settings_category_devices
 import ru.fromchat.settings_category_devices_d
 import ru.fromchat.settings_category_notifications
 import ru.fromchat.settings_category_notifications_d
+import ru.fromchat.logs_title
 import ru.fromchat.settings_hub_about_sub
+import ru.fromchat.settings_hub_logs_sub
 import ru.fromchat.ui.LocalNavController
 
 val SettingsStepHorizontalPadding = 24.dp
@@ -113,7 +116,15 @@ fun SettingsTab() {
                     headline = stringResource(Res.string.about),
                     supportingText = stringResource(Res.string.settings_hub_about_sub),
                     onClick = { navController.navigate(SettingsRoutes.About) },
-                    leadingContent = { Icon(Icons.Filled.Info, null) }
+                    leadingContent = { Icon(Icons.Filled.Info, null) },
+                    divider = true
+                )
+
+                ListItem(
+                    headline = stringResource(Res.string.logs_title),
+                    supportingText = stringResource(Res.string.settings_hub_logs_sub),
+                    onClick = { navController.navigate(SettingsRoutes.Logs) },
+                    leadingContent = { Icon(Icons.Outlined.BugReport, null) }
                 )
             }
         }

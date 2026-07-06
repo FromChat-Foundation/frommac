@@ -1,6 +1,5 @@
 package ru.fromchat.api
 
-import android.util.Log
 import com.google.android.gms.tasks.Task
 import com.google.firebase.messaging.FirebaseMessaging
 import com.pr0gramm3r101.utils.settings.settings
@@ -11,6 +10,7 @@ import io.ktor.client.request.setBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import ru.fromchat.Logger
 import ru.fromchat.api.schema.core.SimpleStatusResponse
 import ru.fromchat.config.ServerConfig
 import kotlin.coroutines.resume
@@ -41,10 +41,10 @@ private suspend fun postFcmToken(token: String): Boolean {
                 setBody(ApiClient.json.encodeToString(mapOf("token" to token)))
             }
             .body<SimpleStatusResponse>()
-        Log.d("FcmReg", "Uploaded FCM token to server: ...$suffix")
+        Logger.i("FcmReg", "Uploaded FCM token to server: ...$suffix")
         true
     }.getOrElse { e ->
-        Log.e("FcmReg", "Failed to upload FCM token: ${e.message}", e)
+        Logger.e("FcmReg", "Failed to upload FCM token: ${e.message}", e)
         false
     }
 }
@@ -53,9 +53,8 @@ actual suspend fun uploadPendingFcmTokenIfAvailable() = withContext(Dispatchers.
     try {
         val pending = settings.getString(PENDING_FCM_TOKEN_KEY, "")
 
-        // Only upload if we have auth token
         if (ApiClient.token.isNullOrEmpty() || pending.isBlank()) {
-            Log.d("FcmReg", "Auth token missing or no FCM token; deferring FCM token upload")
+            Logger.d("FcmReg", "Auth token missing or no FCM token; deferring FCM token upload")
             return@withContext
         }
 
@@ -63,16 +62,16 @@ actual suspend fun uploadPendingFcmTokenIfAvailable() = withContext(Dispatchers.
             settings.putString(CURRENT_FCM_TOKEN_KEY, pending)
             settings.remove(PENDING_FCM_TOKEN_KEY)
         } else {
-            Log.d("FcmReg", "Deferring pending FCM token upload")
+            Logger.d("FcmReg", "Deferring pending FCM token upload")
         }
     } catch (e: Exception) {
-        Log.e("FcmReg", "uploadPendingFcmTokenIfAvailable error: ${e.message}")
+        Logger.e("FcmReg", "uploadPendingFcmTokenIfAvailable error: ${e.message}")
     }
 }
 
 actual suspend fun ensureFcmTokenRegistered(): Boolean = withContext(Dispatchers.IO) {
     if (ApiClient.token.isNullOrEmpty()) {
-        Log.d("FcmReg", "Auth token missing; skip explicit FCM sync")
+        Logger.d("FcmReg", "Auth token missing; skip explicit FCM sync")
         return@withContext false
     }
 
@@ -92,19 +91,19 @@ actual suspend fun ensureFcmTokenRegistered(): Boolean = withContext(Dispatchers
         }
         result
     } catch (e: Exception) {
-        Log.e("FcmReg", "ensureFcmTokenRegistered error: ${e.message}")
+        Logger.e("FcmReg", "ensureFcmTokenRegistered error: ${e.message}")
         false
     }
 }
 
 actual suspend fun unregisterFcmTokenFromServer(): Boolean = withContext(Dispatchers.IO) {
     if (ApiClient.token.isNullOrEmpty()) {
-        Log.d("FcmReg", "Auth token missing; cannot unregister FCM token")
+        Logger.d("FcmReg", "Auth token missing; cannot unregister FCM token")
         return@withContext false
     }
 
     val token = settings.getString(CURRENT_FCM_TOKEN_KEY, "").trim()
-    Log.d("FcmReg", "unregisterFcmTokenFromServer requested with token=...${token.takeLast(8)}")
+    Logger.i("FcmReg", "unregisterFcmTokenFromServer requested with token=...${token.takeLast(8)}")
     return@withContext runCatching {
         ApiClient.http.post("${ServerConfig.apiBaseUrl}/push/unregister") {
             header("Content-Type", "application/json")
@@ -118,7 +117,7 @@ actual suspend fun unregisterFcmTokenFromServer(): Boolean = withContext(Dispatc
         }
         true
     }.getOrElse { e ->
-        Log.e("FcmReg", "Failed to unregister FCM token: ${e.message}")
+        Logger.e("FcmReg", "Failed to unregister FCM token: ${e.message}")
         false
     }
 }

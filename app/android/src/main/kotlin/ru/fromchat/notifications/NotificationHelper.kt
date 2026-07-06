@@ -9,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
@@ -25,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import ru.fromchat.MainActivity
+import ru.fromchat.Logger
 import ru.fromchat.R
 import ru.fromchat.api.ApiClient
 import ru.fromchat.api.local.messages.ChatListPreviewStrings
@@ -145,16 +145,16 @@ object NotificationHelper {
         dmMessageId: Int? = null,
         dmSenderName: String? = null
     ) {
-        Log.d("NotificationHelper", "fetchAndNotify: starting fetch")
+        Logger.i("NotificationHelper", "fetchAndNotify: starting fetch")
 
         try {
             val currentUserId = settings.getInt("current_user_id", -1)
-            Log.d(
+            Logger.d(
                 "NotificationHelper",
                 "fetchAndNotify: currentUserId=$currentUserId hasToken=${ApiClient.token?.isNotBlank() ?: false}"
             )
             if (currentUserId == -1) {
-                Log.w("NotificationHelper", "fetchAndNotify: missing currentUserId, skipping push sync")
+                Logger.w("NotificationHelper", "fetchAndNotify: missing currentUserId, skipping push sync")
                 return
             }
 
@@ -163,7 +163,7 @@ object NotificationHelper {
                 .body<MessagesResponse>()
                 .messages
                 .filter { it.user_id != currentUserId }
-            Log.d("NotificationHelper", "fetchAndNotify: fetched ${messages.size} public messages (excluding self)")
+            Logger.i("NotificationHelper", "fetchAndNotify: fetched ${messages.size} public messages (excluding self)")
             if (messages.isNotEmpty()) {
                 settings.putLong(PREF_LAST_NOTIFICATION_TIME, System.currentTimeMillis())
                 CoroutineScope(Dispatchers.Main).launch {
@@ -171,7 +171,7 @@ object NotificationHelper {
                     displayNotifications(context, messages)
                 }
             } else {
-                Log.d("NotificationHelper", "fetchAndNotify: no public messages returned")
+                Logger.d("NotificationHelper", "fetchAndNotify: no public messages returned")
             }
 
             if (includeDmMessages) {
@@ -180,14 +180,14 @@ object NotificationHelper {
         } catch (e: Exception) {
             if (e is ClientRequestException && e.response.status.value == 401) {
                 try {
-                    Log.w("NotificationHelper", "fetchAndNotify: received 401; reloading token and retrying")
+                    Logger.w("NotificationHelper", "fetchAndNotify: received 401; reloading token and retrying")
                     ApiClient.loadPersistedData()
                     val retryMessages = ApiClient.http
                         .get("${ServerConfig.apiBaseUrl}/messages/new")
                         .body<MessagesResponse>()
                         .messages
                         .filter { it.user_id != settings.getInt("current_user_id", -1) }
-                    Log.d(
+                    Logger.i(
                         "NotificationHelper",
                         "fetchAndNotify retry: fetched ${retryMessages.size} public messages"
                     )
@@ -202,10 +202,10 @@ object NotificationHelper {
                     }
                     return
                 } catch (_: Exception) {
-                    Log.e("NotificationHelper", "fetchAndNotify retry failed", e)
+                    Logger.e("NotificationHelper", "fetchAndNotify retry failed", e)
                 }
             }
-            Log.e("NotificationHelper", "fetchAndNotify: error ${e.message}", e)
+            Logger.e("NotificationHelper", "fetchAndNotify: error ${e.message}", e)
         }
     }
 
@@ -223,7 +223,7 @@ object NotificationHelper {
         }
 
         if (sinceId == null || sinceId < 0) {
-            Log.d("NotificationHelper", "fetchAndNotifyDirectMessages: no dm watermark yet, skipping broad dm sync")
+            Logger.d("NotificationHelper", "fetchAndNotifyDirectMessages: no dm watermark yet, skipping broad dm sync")
             return
         }
 
@@ -233,7 +233,7 @@ object NotificationHelper {
             if (throwable is ClientRequestException && throwable.response.status.value == 401) {
                 throw throwable
             }
-            Log.e(
+            Logger.e(
                 "NotificationHelper",
                 "fetchAndNotifyDirectMessages: failed to fetch dm messages for since=$sinceId: ${throwable.message}",
                 throwable
@@ -252,7 +252,7 @@ object NotificationHelper {
         dmSenderName: String?
     ) {
         val dmMessages = response.messages
-        Log.d("NotificationHelper", "fetchAndNotifyDirectMessages: fetched ${dmMessages.size} dm messages")
+        Logger.i("NotificationHelper", "fetchAndNotifyDirectMessages: fetched ${dmMessages.size} dm messages")
         if (dmMessages.isEmpty()) {
             return
         }
@@ -271,7 +271,7 @@ object NotificationHelper {
                 val shownDmKey = "dm:$envelopeId"
 
                 if (shownDm.contains(shownDmKey) || envelopeId <= latestMessageId) {
-                    Log.d(
+                    Logger.d(
                         "NotificationHelper",
                         "Direct notification skipped: already shown envelopeId=$envelopeId"
                     )
@@ -283,7 +283,7 @@ object NotificationHelper {
                 }.getOrElse { throwable ->
                     when (throwable) {
                         is DmCiphertextCorruptedException -> {
-                            Log.w(
+                            Logger.w(
                                 "NotificationHelper",
                                 "DM decrypt failed for envelopeId=$envelopeId"
                             )
@@ -291,7 +291,7 @@ object NotificationHelper {
                         }
 
                         else -> {
-                            Log.w(
+                            Logger.w(
                                 "NotificationHelper",
                                 "DM decrypt failed for envelopeId=$envelopeId: ${throwable.message}",
                                 throwable
@@ -355,16 +355,16 @@ object NotificationHelper {
 
             val currentUserId = settings.getInt("current_user_id", -1)
             if (!isDirectMessage && senderId != null && senderId == currentUserId) {
-                Log.d("NotificationHelper", "Fallback push skipped: own public message senderId=$senderId")
+                Logger.d("NotificationHelper", "Fallback push skipped: own public message senderId=$senderId")
                 return@launch
             }
             if (isDirectMessage && targetDmUserId != null && targetDmUserId == currentUserId) {
-                Log.d("NotificationHelper", "Fallback push skipped: own DM targetDmUserId=$targetDmUserId")
+                Logger.d("NotificationHelper", "Fallback push skipped: own DM targetDmUserId=$targetDmUserId")
                 return@launch
             }
 
             if (isPublicChatVisible && !allowWhenPublicChatVisible) {
-                Log.d("NotificationHelper", "Fallback push notification skipped: public chat is visible")
+                Logger.d("NotificationHelper", "Fallback push notification skipped: public chat is visible")
                 return@launch
             }
 
@@ -375,7 +375,7 @@ object NotificationHelper {
                         Manifest.permission.POST_NOTIFICATIONS
                     ) != PackageManager.PERMISSION_GRANTED
                 ) {
-                    Log.w(
+                    Logger.w(
                         "NotificationHelper",
                         "Fallback push notification skipped: POST_NOTIFICATIONS permission missing"
                     )
@@ -385,7 +385,7 @@ object NotificationHelper {
                 val shown = settings.getStringSet(PREF_SHOWN_KEY, emptySet()).toMutableSet()
                 val shownKey = if (isDirectMessage) "dm:${messageId}" else messageId?.toString()
                 if (messageId != null && shown.contains(shownKey)) {
-                    Log.d(
+                    Logger.d(
                         "NotificationHelper",
                         "Fallback push notification skipped: already shown messageId=$messageId"
                     )
@@ -446,20 +446,20 @@ object NotificationHelper {
                         .build()
                 )
                 settings.putStringSet(PREF_SHOWN_KEY, shown)
-                Log.d(
+                Logger.i(
                     "NotificationHelper",
-                    "Fallback push notification shown title=$title sender=$senderName messageId=$messageId"
+                    "Fallback push notification shown messageId=$messageId"
                 )
             }
         }
     }
     @OptIn(DelicateCoroutinesApi::class)
     private fun displayNotifications(context: Context, messages: List<Message>) {
-        Log.d("NotificationHelper", "displayNotifications: ${messages.size} messages")
+        Logger.i("NotificationHelper", "displayNotifications: ${messages.size} messages")
 
         // Don't show notifications if user is currently viewing the public chat
         if (isPublicChatVisible) {
-            Log.d("NotificationHelper", "Skipping notifications: user is viewing public chat")
+            Logger.d("NotificationHelper", "Skipping notifications: user is viewing public chat")
             return
         }
 
@@ -485,7 +485,7 @@ object NotificationHelper {
                         msg.user_id != currentUserId // Not from current user
                     }
                     if (newMessages.isEmpty()) {
-                        Log.d(
+                        Logger.d(
                             "NotificationHelper",
                             "displayNotifications: no new messages after filters for user=$currentUserId"
                         )
@@ -494,7 +494,7 @@ object NotificationHelper {
                     newMessages.apply { forEach { shown.add(it.id.toString()) } }
 
                     newMessageCount = newMessages.size
-                    Log.d(
+                    Logger.d(
                         "NotificationHelper",
                         "displayNotifications: user=$currentUserId totalMessages=${messages.size} newMessages=${newMessageCount}"
                     )
@@ -553,7 +553,7 @@ object NotificationHelper {
                             .build()
                     )
                 } else {
-                    Log.w(
+                    Logger.w(
                         "NotificationHelper",
                         "displayNotifications: POST_NOTIFICATIONS permission missing, skipping"
                     )
@@ -561,7 +561,7 @@ object NotificationHelper {
             }
 
             settings.putStringSet(PREF_SHOWN_KEY, shown)
-            Log.d("NotificationHelper", "displayNotifications: shown $newMessageCount new messages, total shown=${shown.size}")
+            Logger.i("NotificationHelper", "displayNotifications: shown $newMessageCount new messages, total shown=${shown.size}")
         }
     }
 }

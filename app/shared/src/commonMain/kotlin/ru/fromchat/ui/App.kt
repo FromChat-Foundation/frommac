@@ -86,6 +86,9 @@ import ru.fromchat.ui.chat.panels.publicchat.PublicChatNav
 import ru.fromchat.ui.chat.panels.publicchat.PublicChatProfileRoute
 import ru.fromchat.ui.main.MainScreen
 import ru.fromchat.ui.main.chats.ChatsSearchScreen
+import ru.fromchat.ui.main.settings.LOG_FILE_OPEN_RESULT_KEY
+import ru.fromchat.ui.main.settings.LogFilesScreen
+import ru.fromchat.ui.main.settings.LogsScreen
 import ru.fromchat.ui.main.settings.AboutScreen
 import ru.fromchat.ui.main.settings.AppearanceScreen
 import ru.fromchat.ui.main.settings.DevicesScreen
@@ -224,6 +227,7 @@ fun App(
             runCatching { ensureFromChatCacheGeneration() }
             runCatching { NetworkConnectivity.ensureStarted() }
             runCatching { ApiClient.loadPersistedData() }
+            Logger.i("App", "FromChat started")
         }
 
         val hasToken = ApiClient.token?.isNotEmpty() == true
@@ -313,7 +317,7 @@ fun App(
             val profileLookupSnackbarHostState = remember { SnackbarHostState() }
             LaunchedEffect(profileLookupErrorMessage) {
                 profileLookupErrorMessage?.let { message ->
-                    Logger.d("ProfileDeepLink", "showing snackbar for deep-link lookup failure: $message")
+                    Logger.w("ProfileDeepLink", "showing snackbar for deep-link lookup failure: $message")
                     profileLookupSnackbarHostState.showSnackbar(
                         message = message,
                         withDismissAction = true,
@@ -593,6 +597,21 @@ fun App(
                                 AboutScreen()
                             }
 
+                            settingsComposable(SettingsRoutes.Logs) {
+                                LogsScreen()
+                            }
+
+                            settingsComposable(SettingsRoutes.LogFiles) {
+                                LogFilesScreen(
+                                    onOpenFile = { file ->
+                                        navController.previousBackStackEntry
+                                            ?.savedStateHandle
+                                            ?.set(LOG_FILE_OPEN_RESULT_KEY, file.path)
+                                        navController.navigateUp()
+                                    },
+                                )
+                            }
+
                             settingsComposable(
                                 route = DocumentType.ROUTE,
                                 arguments = listOf(
@@ -660,7 +679,7 @@ fun App(
 
                         DisposableEffect(navController) {
                             ApiClient.onAuthError = {
-                                Logger.d("App", "Global auth error handler triggered, navigating to login")
+                                Logger.i("App", "Global auth error handler triggered, navigating to login")
                                 runCatching {
                                     navController.navigateAndWipeBackStack("welcome")
                                 }.onFailure { e ->

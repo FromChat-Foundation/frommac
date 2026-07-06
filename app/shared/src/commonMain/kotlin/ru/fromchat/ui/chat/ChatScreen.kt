@@ -351,7 +351,7 @@ fun ChatScreen(
                     )
                 }
                 else -> {
-                    Logger.d("ChatScreen", "Unhandled top-level WebSocket message type: ${message.type}")
+                    Logger.w("ChatScreen", "Unhandled top-level WebSocket message type: ${message.type}")
                 }
             }
         }

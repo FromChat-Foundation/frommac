@@ -397,7 +397,7 @@ actual fun CallMediaLayer(
                 }
             }
 
-            Logger.d(
+            Logger.i(
                 TAG,
                 "RoomScope starting url=${connect.serverUrl} room=${connect.roomName} " +
                     "(mic UI sync waits for CONNECTED; DISCONNECTED means join failed or network)",
@@ -435,7 +435,7 @@ actual fun CallMediaLayer(
                     reconnectAttempt = 0
                     reconnectGeneration += 1 // invalidate any pending reconnect
 
-                    Logger.d(
+                    Logger.i(
                         TAG,
                         "RoomScope onConnected state=${room.state} micReq=$micRequestedOn " +
                             "micEn=${room.localParticipant.isMicrophoneEnabled}",
@@ -458,7 +458,7 @@ actual fun CallMediaLayer(
                                 connectionStatusText = null
                                 reconnectAttempt = 0
                                 reconnectGeneration += 1 // invalidate any pending reconnect
-                                Logger.d(TAG, "RoomEvent.Connected")
+                                Logger.i(TAG, "RoomEvent.Connected")
                             }
                             is RoomEvent.Disconnected -> {
                                 val detail = event.error?.message ?: event.reason.toString()
@@ -483,7 +483,7 @@ actual fun CallMediaLayer(
                             }
                             is RoomEvent.Reconnected -> {
                                 connectionStatusText = null
-                                Logger.d(TAG, "RoomEvent.Reconnected")
+                                Logger.i(TAG, "RoomEvent.Reconnected")
                             }
                             else -> {}
                         }
