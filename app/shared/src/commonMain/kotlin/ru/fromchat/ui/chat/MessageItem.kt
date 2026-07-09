@@ -3,6 +3,7 @@ package ru.fromchat.ui.chat
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -62,6 +63,7 @@ import ru.fromchat.api.local.messages.isQueuedOutbound
 import ru.fromchat.api.schema.messages.Message
 import ru.fromchat.message_corrupted
 import ru.fromchat.message_edited_suffix
+import ru.fromchat.message_reply_jump_cd
 import ru.fromchat.message_send_failed
 import ru.fromchat.ui.chat.components.getMessageGradient
 import ru.fromchat.ui.chat.components.getReplyMessageGradient
@@ -113,6 +115,9 @@ fun MessageItem(
     isContextMenuForThisMessage: Boolean = false,
     onCancelOutboundAttachment: ((Message) -> Unit)? = null,
     onRetryOutboundAttachment: ((Message) -> Unit)? = null,
+    onReplyClick: ((Int) -> Unit)? = null,
+    highlightMessageId: Int? = null,
+    highlightFading: Boolean = false,
 ) {
     // Cache derived values per message to avoid recomputing in every recomposition.
     val isCorrupted = remember(message.files, message.fileThumbnails, message.dmEnvelope) {
@@ -138,10 +143,12 @@ fun MessageItem(
 
     var isPressed by remember { mutableStateOf(false) }
     var avatarPressed by remember(message.id) { mutableStateOf(false) }
+    var replyPressed by remember(message.id) { mutableStateOf(false) }
     var bubbleBodyPositionInRoot by remember { mutableStateOf(Offset.Zero) }
     var slackRowLayoutCoords by remember(message.id) { mutableStateOf<LayoutCoordinates?>(null) }
     val scaleTarget = if (isPressed && !isContextMenuForThisMessage && !isContextMenuOpen) 0.96f else 1f
     val avatarScaleTarget = if (avatarPressed && !isContextMenuOpen) 0.96f else 1f
+    val replyScaleTarget = if (replyPressed && !isContextMenuOpen) 0.96f else 1f
     val scale by animateFloatAsState(
         targetValue = scaleTarget,
         animationSpec = spring(
@@ -160,14 +167,53 @@ fun MessageItem(
         visibilityThreshold = 0.001f,
         label = "messageAvatarScale"
     )
+    val replyScale by animateFloatAsState(
+        targetValue = replyScaleTarget,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        visibilityThreshold = 0.001f,
+        label = "messageReplyScale"
+    )
+    val isHighlightTarget = highlightMessageId == message.id && message.id > 0
+    val highlightAlpha by animateFloatAsState(
+        targetValue = when {
+            !isHighlightTarget -> 0f
+            highlightFading -> 0f
+            else -> 1f
+        },
+        animationSpec = tween(
+            durationMillis = when {
+                !isHighlightTarget -> 0
+                highlightFading -> 300
+                else -> 250
+            },
+        ),
+        label = "replyJumpHighlight",
+    )
+    val replyJumpCd = stringResource(Res.string.message_reply_jump_cd)
 
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = if (isAuthor) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.Bottom
-    ) {
+    Box(modifier = modifier.fillMaxWidth()) {
+        if (highlightAlpha > 0f) {
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .background(
+                        MaterialTheme.colorScheme.primaryContainer.copy(
+                            alpha = 0.4f * highlightAlpha,
+                        ),
+                    ),
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = if (isAuthor) Arrangement.End else Arrangement.Start,
+            verticalAlignment = Alignment.Bottom,
+        ) {
         if (!isAuthor && showUsername) {
             Box(
                 modifier = Modifier
@@ -407,8 +453,37 @@ fun MessageItem(
                         // Reply preview
                         replyRef?.let { replyToMsg ->
                             val replyName = messageDisplayUsername(replyToMsg, currentUserId)
+                            val replyTapEnabled = onReplyClick != null && replyToMsg.id > 0
+                            val replyPressModifier =
+                                if (replyTapEnabled && !isContextMenuOpen) {
+                                    Modifier.pointerInput(replyToMsg.id, isContextMenuOpen) {
+                                        detectTapGestures(
+                                            onPress = {
+                                                replyPressed = true
+                                                try {
+                                                    awaitRelease()
+                                                } finally {
+                                                    replyPressed = false
+                                                }
+                                            },
+                                            onTap = { onReplyClick.invoke(replyToMsg.id) },
+                                        )
+                                    }
+                                } else {
+                                    Modifier
+                                }
                             Box(
-                                Modifier.padding(bottom = 4.dp, start = 6.dp, end = 6.dp)
+                                Modifier
+                                    .padding(bottom = 4.dp, start = 6.dp, end = 6.dp)
+                                    .graphicsLayer(
+                                        scaleX = replyScale,
+                                        scaleY = replyScale,
+                                        transformOrigin = TransformOrigin.Center,
+                                    )
+                                    .then(replyPressModifier)
+                                    .semantics {
+                                        if (replyTapEnabled) contentDescription = replyJumpCd
+                                    },
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -435,15 +510,13 @@ fun MessageItem(
                                     Column(
                                         Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
                                     ) {
-                                        if (showUsername) {
-                                            Text(
-                                                text = replyName,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.primary,
-                                                fontSize = 11.sp
-                                            )
-                                        }
+                                        Text(
+                                            text = replyName,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontSize = 11.sp
+                                        )
                                         Text(
                                             text = replyToMsg.content.take(50) + if (replyToMsg.content.length > 50) "..." else "",
                                             style = MaterialTheme.typography.bodySmall,
@@ -685,6 +758,7 @@ fun MessageItem(
                 }
                 }
             }
+        }
         }
     }
 }

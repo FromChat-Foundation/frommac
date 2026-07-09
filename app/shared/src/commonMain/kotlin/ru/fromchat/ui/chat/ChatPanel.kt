@@ -262,6 +262,17 @@ abstract class ChatPanel(
         updateState { it.copy(messages = it.messages.filter { msg -> msg.id != messageId }) }
     }
 
+    /** Drop reply previews that point at a message removed from the chat. */
+    protected fun clearReplyReferencesTo(deletedMessageId: Int) {
+        updateState { currentState ->
+            val updated = currentState.messages.map { msg ->
+                if (msg.reply_to?.id == deletedMessageId) msg.copy(reply_to = null) else msg
+            }
+            if (updated == currentState.messages) currentState
+            else currentState.copy(messages = updated)
+        }
+    }
+
     protected fun removeMessageByClientMessageId(clientMessageId: String) {
         updateState {
             it.copy(messages = it.messages.filter { msg -> msg.client_message_id != clientMessageId })

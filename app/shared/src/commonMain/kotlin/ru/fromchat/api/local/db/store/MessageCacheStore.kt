@@ -78,7 +78,7 @@ object MessageCacheStore {
             .asFlow()
             .mapToList(Dispatchers.Default)
             .map { rows ->
-                val raw = rows.map { it.toAppMessage() }
+                val raw = hydrateReplyReferences(rows)
                 val withoutSuperseded = dropSupersededOptimisticMessages(raw, ApiClient.user?.id)
                 sortMessagesForChatDisplay(
                     validatedOrEmpty(
@@ -187,11 +187,12 @@ object MessageCacheStore {
         val merged = dedupeMessagesByClientId(
             dropSupersededOptimisticMessages(before, ApiClient.user?.id),
         ).let { sortMessagesForChatDisplay(it) }
+        val hydrated = hydrateReplyToInMemory(merged)
         val iid = instanceId()
         withContext(Dispatchers.Default) {
-            purgeSupersededPendingRows(iid, convId, before, merged)
+            purgeSupersededPendingRows(iid, convId, before, hydrated)
         }
-        replaceMessages(convId, merged)
+        replaceMessages(convId, hydrated)
         pruneEmptyConversations()
     }
 
@@ -316,7 +317,7 @@ object MessageCacheStore {
                 timestamp = msg.timestamp,
                 isRead = if (msg.is_read) 1L else 0L,
                 isEdited = if (msg.is_edited) 1L else 0L,
-                replyToId = msg.reply_to?.id?.toLong(),
+                replyToId = resolveReplyToIdForPersistence(msg, row.replyToId),
                 clientMessageId = msg.client_message_id,
                 deletedFlag = 0L,
                 sendStatus = "sent",
@@ -808,6 +809,10 @@ object MessageCacheStore {
     private suspend fun upsertSingle(conversationId: String, msg: Message) {
         val iid = instanceId()
         withContext(Dispatchers.Default) {
+            val existingReplyToId = db.messageDatabaseQueries
+                .selectMessageById(iid, conversationId, msg.id.toLong())
+                .executeAsOneOrNull()
+                ?.replyToId
             db.messageDatabaseQueries.upsertMessage(
                 instanceId = iid,
                 id = msg.id.toLong(),
@@ -817,7 +822,7 @@ object MessageCacheStore {
                 timestamp = msg.timestamp,
                 isRead = if (msg.is_read) 1L else 0L,
                 isEdited = if (msg.is_edited) 1L else 0L,
-                replyToId = msg.reply_to?.id?.toLong(),
+                replyToId = resolveReplyToIdForPersistence(msg, existingReplyToId),
                 clientMessageId = msg.client_message_id,
                 deletedFlag = 0L,
                 sendStatus = if (msg.id < 0) "pending" else "sent"
@@ -840,7 +845,7 @@ object MessageCacheStore {
                     timestamp = confirmed.timestamp,
                     isRead = if (confirmed.is_read) 1L else 0L,
                     isEdited = if (confirmed.is_edited) 1L else 0L,
-                    replyToId = confirmed.reply_to?.id?.toLong(),
+                    replyToId = resolveReplyToIdForPersistence(confirmed),
                     clientMessageId = confirmed.client_message_id,
                     deletedFlag = 0L,
                     sendStatus = "sent"
@@ -860,7 +865,7 @@ object MessageCacheStore {
             val rows = db.messageDatabaseQueries
                 .selectMessagesByConversation(iid, conversationId)
                 .executeAsList()
-            val raw = rows.map { it.toAppMessage() }
+            val raw = hydrateReplyReferences(rows)
             val withoutSuperseded = dropSupersededOptimisticMessages(raw, ApiClient.user?.id)
             purgeSupersededPendingRows(iid, conversationId, raw, withoutSuperseded)
             sortMessagesForChatDisplay(
@@ -880,7 +885,7 @@ object MessageCacheStore {
             val rows = db.messageDatabaseQueries
                 .selectRecentMessagesByConversation(iid, conversationId, limit)
                 .executeAsList()
-            rows.map { it.toAppMessage() }.reversed()
+            hydrateReplyReferences(rows).reversed()
         }
     }
 
@@ -990,13 +995,28 @@ object MessageCacheStore {
         val messages = rows.map { it.toAppMessage() }
         val byId = messages.associateBy { it.id }
         return rows.zip(messages).map { (row, message) ->
-            val replyId = row.replyToId?.toInt()
+            val replyId = row.replyToId?.toInt() ?: message.dmEnvelope?.replyToId
             if (replyId != null) {
                 message.copy(reply_to = byId[replyId])
             } else {
                 message
             }
         }
+    }
+
+    private fun hydrateReplyToInMemory(messages: List<Message>): List<Message> {
+        val byId = messages.associateBy { it.id }
+        return messages.map { msg ->
+            if (msg.reply_to != null) return@map msg
+            val replyId = msg.dmEnvelope?.replyToId ?: return@map msg
+            byId[replyId]?.let { msg.copy(reply_to = it) } ?: msg
+        }
+    }
+
+    private fun resolveReplyToIdForPersistence(msg: Message, existingReplyToId: Long? = null): Long? {
+        return msg.reply_to?.id?.toLong()
+            ?: msg.dmEnvelope?.replyToId?.toLong()
+            ?: existingReplyToId?.takeIf { it > 0L }
     }
 
     private fun DbMessage.toAppMessage(): Message {
@@ -1080,6 +1100,10 @@ object MessageCacheStore {
         val validated = CacheValidator.filterMessages(conversationId, messages, self)
         val iid = instanceId()
         withContext(Dispatchers.Default) {
+            val existingReplyToIds = db.messageDatabaseQueries
+                .selectMessagesByConversation(iid, conversationId)
+                .executeAsList()
+                .associate { it.id.toInt() to it.replyToId }
             db.messageDatabaseQueries.transaction {
                 db.messageDatabaseQueries.deleteMessagesForConversation(iid, conversationId)
                 validated.forEach { msg: Message ->
@@ -1092,7 +1116,7 @@ object MessageCacheStore {
                         timestamp = msg.timestamp,
                         isRead = if (msg.is_read) 1L else 0L,
                         isEdited = if (msg.is_edited) 1L else 0L,
-                        replyToId = msg.reply_to?.id?.toLong(),
+                        replyToId = resolveReplyToIdForPersistence(msg, existingReplyToIds[msg.id]),
                         clientMessageId = msg.client_message_id,
                         deletedFlag = 0L,
                         sendStatus = if (msg.id < 0) "pending" else "sent"

@@ -69,5 +69,18 @@ internal fun mergeMessageUiFields(db: Message, panel: Message?): Message {
         fileDimensions = db.fileDimensions ?: panel.fileDimensions,
         content = db.content.ifBlank { panel.content },
         isContentCorrupted = panel.isContentCorrupted || db.isContentCorrupted,
+        reply_to = db.reply_to ?: panel.reply_to,
     )
+}
+
+/** Keeps hydrated [Message.reply_to] when a network/DB refresh omits nested reply payloads. */
+internal fun preserveReplyToFromExisting(
+    existing: List<Message>,
+    incoming: List<Message>,
+): List<Message> {
+    val existingById = existing.associateBy { it.id }
+    return incoming.map { msg ->
+        if (msg.reply_to != null) msg
+        else existingById[msg.id]?.reply_to?.let { msg.copy(reply_to = it) } ?: msg
+    }
 }

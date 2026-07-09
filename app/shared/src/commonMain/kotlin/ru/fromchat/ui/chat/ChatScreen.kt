@@ -38,6 +38,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +57,7 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
 import dev.chrisbanes.haze.rememberHazeState
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -118,6 +120,7 @@ import ru.fromchat.utils.haptic.HapticFeedbackEvent
 import ru.fromchat.utils.haptic.rememberHapticFeedback
 import ru.fromchat.utils.rememberLastSeenFormatStrings
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalHazeMaterialsApi::class)
 @Composable
@@ -156,7 +159,40 @@ fun ChatScreen(
     val listState = rememberSaveable(panelId, saver = LazyListState.Saver) {
         LazyListState(0, 0)
     }
+    val density = LocalDensity.current
+    val fallbackMessageHeightPx = remember(density) { with(density) { 80.dp.roundToPx() } }
     val scope = rememberCoroutineScope()
+    var highlightMessageId by remember { mutableStateOf<Int?>(null) }
+    var highlightFading by remember { mutableStateOf(false) }
+    LaunchedEffect(highlightMessageId) {
+        val messageId = highlightMessageId ?: return@LaunchedEffect
+        highlightFading = false
+        delay(1.seconds)
+        highlightFading = true
+        delay(300.milliseconds)
+        if (highlightMessageId == messageId) {
+            highlightMessageId = null
+            highlightFading = false
+        }
+    }
+    val chatScrollClearancePx = remember { mutableStateOf(0 to 0) }
+    val scrollToChatMessage: (Int) -> Unit = { messageId ->
+        val messages = panelState.messages
+        val messageIndex = messages.indexOfFirst { it.id == messageId }
+        if (messageIndex != -1) {
+            scope.launch {
+                val lazyIndex = 1 + (messages.size - 1 - messageIndex)
+                val (topClearancePx, bottomClearancePx) = chatScrollClearancePx.value
+                listState.scrollChatMessageToCenter(
+                    lazyIndex,
+                    topClearancePx,
+                    bottomClearancePx,
+                    fallbackMessageHeightPx,
+                )
+                highlightMessageId = messageId
+            }
+        }
+    }
     val saveMessageImage = rememberSaveMessageImage { /* best-effort */ }
     val saveMessageFile = rememberSaveMessageFile { /* best-effort */ }
     val haptic = rememberHapticFeedback()
@@ -250,17 +286,7 @@ fun ChatScreen(
 
     // Scroll to specific message when requested (e.g., from notification click)
     LaunchedEffect(scrollToMessageId, panelState.messages) {
-        scrollToMessageId?.let { messageId ->
-            val messages = panelState.messages
-            val messageIndex = messages.indexOfFirst { it.id == messageId }
-            if (messageIndex != -1) {
-                scope.launch {
-                    // reverseLayout list: index 0 = bottom spacer, 1..n = newest..oldest
-                    val lazyIndex = 1 + (messages.size - 1 - messageIndex)
-                    listState.animateScrollToItem(index = lazyIndex, scrollOffset = 0)
-                }
-            }
-        }
+        scrollToMessageId?.let(scrollToChatMessage)
     }
 
     // UI state
@@ -695,6 +721,11 @@ fun ChatScreen(
             val statusBarTopDp = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
             val floatingHeaderClearance =
                 statusBarTopDp + 64.dp + 12.dp + ChatFloatingHeaderBottomArcRadius
+            SideEffect {
+                chatScrollClearancePx.value = with(density) {
+                    floatingHeaderClearance.roundToPx() to innerPadding.calculateBottomPadding().roundToPx()
+                }
+            }
 
             Box(
                 modifier = Modifier
@@ -800,6 +831,9 @@ fun ChatScreen(
                                         OutgoingMessageCoordinator.retryDmAttachmentUpload(cid)
                                     }
                                 },
+                                onReplyClick = scrollToChatMessage,
+                                highlightMessageId = highlightMessageId,
+                                highlightFading = highlightFading,
                             )
                         }
 
@@ -950,4 +984,31 @@ fun ChatScreen(
         }
     }
 
+}
+
+private suspend fun LazyListState.scrollChatMessageToCenter(
+    lazyIndex: Int,
+    topClearancePx: Int,
+    bottomClearancePx: Int,
+    fallbackItemHeightPx: Int,
+) {
+    val info = layoutInfo
+    val viewportHeight = (
+        info.viewportEndOffset - info.afterContentPadding - info.viewportStartOffset
+    ).coerceAtLeast(0)
+    val itemHeight = info.visibleItemsInfo.firstOrNull { it.index == lazyIndex }?.size
+        ?: info.visibleItemsInfo
+            .filter { it.index > 0 }
+            .map { it.size }
+            .takeIf { it.isNotEmpty() }
+            ?.average()
+            ?.toInt()
+        ?: fallbackItemHeightPx
+    // reverseLayout: scrollOffset 0 pins the item to the visual bottom (under the input bar).
+    // Negative scrollOffset moves it upward into the viewport; positive would push it further off-screen.
+    val visibleTop = topClearancePx
+    val visibleBottom = (viewportHeight - bottomClearancePx).coerceAtLeast(visibleTop)
+    val targetCenterY = (visibleTop + visibleBottom) / 2f
+    val scrollOffset = (targetCenterY + itemHeight / 2f - viewportHeight).roundToInt()
+    animateScrollToItem(lazyIndex, scrollOffset)
 }

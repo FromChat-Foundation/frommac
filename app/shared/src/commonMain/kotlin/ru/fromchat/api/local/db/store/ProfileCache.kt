@@ -233,6 +233,7 @@ object ProfileCache {
         message: Message,
         currentUserId: Int? = ApiClient.user?.id,
     ): Message {
+        val enrichedReply = message.reply_to?.let { enrichPublicMessageForDisplay(it, currentUserId) }
         val self = currentUserId
         if (self != null && message.user_id == self) {
             val user = ApiClient.user
@@ -240,6 +241,7 @@ object ProfileCache {
                 username = message.username.trim().ifBlank { user?.username.orEmpty() },
                 profile_picture = message.profile_picture?.takeIf { it.isNotBlank() }
                     ?: user?.profile_picture,
+                reply_to = enrichedReply,
             )
         }
         val profile = get(message.user_id)
@@ -251,6 +253,7 @@ object ProfileCache {
                 ?: profile?.profilePicture,
             verified = message.verified ?: profile?.verified,
             verificationStatus = message.verificationStatus ?: profile?.verificationStatus,
+            reply_to = enrichedReply,
         )
     }
 

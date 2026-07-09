@@ -46,6 +46,7 @@ import ru.fromchat.ui.chat.utils.TypingHandler
 import ru.fromchat.ui.chat.utils.dedupeMessagesByClientId
 import ru.fromchat.ui.chat.utils.dropSupersededOptimisticMessages
 import ru.fromchat.ui.chat.utils.imageAspectRatioForMessage
+import ru.fromchat.ui.chat.utils.preserveReplyToFromExisting
 import ru.fromchat.ui.chat.isImageFilename
 import ru.fromchat.api.local.send.seedOutboundFileAsDownloaded
 
@@ -242,8 +243,8 @@ class DmPanel(
             val historyResult = runCatching { ApiClient.getDmHistory(otherUserId) }
             if (historyResult.isSuccess) {
                 val response = historyResult.getOrNull() ?: return
+                val priorMessages = _state.messages
                 val optimisticSnapshot = snapshotPendingOptimisticMessages()
-                clearMessages()
                 val decryptedForLog = mutableListOf<Pair<Int, String>>()
                 val messages = response.messages.map { envelope ->
                     val outcome = decryptDmEnvelopeForUi(envelope)
@@ -260,15 +261,22 @@ class DmPanel(
                         msg.copy(reply_to = replyToMap[envelope.replyToId])
                     } else msg
                 }
-                addMessages(messagesWithReplies)
-                restorePendingOptimisticMessages(optimisticSnapshot)
-                updateState { state ->
-                    val cleaned = dedupeMessagesByClientId(
-                        dropSupersededOptimisticMessages(state.messages, currentUserId),
-                    )
-                    if (cleaned == state.messages) state else state.copy(messages = cleaned)
+                val mergedForUi = preserveReplyToFromExisting(
+                    priorMessages + optimisticSnapshot,
+                    messagesWithReplies,
+                )
+                batchStateUpdates {
+                    clearMessages()
+                    addMessages(mergedForUi)
+                    restorePendingOptimisticMessages(optimisticSnapshot)
+                    updateState { state ->
+                        val cleaned = dedupeMessagesByClientId(
+                            dropSupersededOptimisticMessages(state.messages, currentUserId),
+                        )
+                        if (cleaned == state.messages) state else state.copy(messages = cleaned)
+                    }
+                    setHasMoreMessages(false)
                 }
-                setHasMoreMessages(false)
 
                 // Persist the most recent DM messages for offline use.
                 val mergedForCache = _state.messages
@@ -361,16 +369,16 @@ class DmPanel(
                     mergeConfirmedOwnMessage(envelope, outcome.plaintext, outcome.isCorrupted)
                 } else {
                     val incoming = createMessage(envelope, outcome.plaintext, outcome.isCorrupted)
+                    val replyTo = envelope.replyToId?.let { replyId ->
+                        _state.messages.find { it.id == replyId }
+                    }
+                    val withReply = if (replyTo != null) incoming.copy(reply_to = replyTo) else incoming
                     if (ActiveDmChatTracker.isActive(otherUserId)) {
                         withContext(Dispatchers.Default) {
-                            MessageCacheStore.upsertDmMessage(otherUserId, incoming)
+                            MessageCacheStore.upsertDmMessage(otherUserId, withReply)
                         }
                     }
-                    addMessage(incoming)
-                    if (envelope.replyToId != null) {
-                        val replyTo = _state.messages.find { it.id == envelope.replyToId }
-                        updateMessage(envelope.id) { it.copy(reply_to = replyTo) }
-                    }
+                    addMessage(withReply)
                 }
             }
         }
@@ -515,7 +523,9 @@ class DmPanel(
                     fileAspectRatios = dec.fileAspectRatios ?: it.fileAspectRatios,
                     fileSizes = dec.fileSizes ?: it.fileSizes,
                     fileDimensions = dec.fileDimensions ?: it.fileDimensions,
-                    isContentCorrupted = outcome.isCorrupted
+                    isContentCorrupted = outcome.isCorrupted,
+                    dmEnvelope = envelope,
+                    reply_to = it.reply_to,
                 )
             }
 

@@ -31,6 +31,7 @@ import ru.fromchat.ui.chat.AvatarInfo
 import ru.fromchat.ui.chat.ChatPanel
 import ru.fromchat.ui.chat.utils.PublicChatTypingHandler
 import ru.fromchat.ui.chat.utils.TypingHandler
+import ru.fromchat.ui.chat.utils.preserveReplyToFromExisting
 
 class PublicChatPanel(
     /** Stable cache / panel id (not localized; hardcoded in [ru.fromchat.ui.chat.utils.PublicChatPanelCache]). */
@@ -78,6 +79,7 @@ class PublicChatPanel(
                     profile_picture = fresh.profile_picture,
                     verified = fresh.verified,
                     verificationStatus = fresh.verificationStatus,
+                    reply_to = fresh.reply_to ?: message.reply_to,
                 ),
             )
         }
@@ -164,9 +166,18 @@ class PublicChatPanel(
         if (cached.isEmpty()) return
         withContext(Dispatchers.Main) {
             batchStateUpdates {
-                clearMessages()
-                addMessages(cached)
-                setLoading(false)
+                val shown = _state.messages
+                if (shown.isNotEmpty()) {
+                    val withReplies = preserveReplyToFromExisting(shown, cached)
+                    if (withReplies != shown) {
+                        updateState { it.copy(messages = sortMessagesForChatDisplay(withReplies)) }
+                    }
+                    setLoading(false)
+                } else {
+                    clearMessages()
+                    addMessages(cached)
+                    setLoading(false)
+                }
             }
         }
     }
@@ -287,7 +298,10 @@ class PublicChatPanel(
                     if (_state.isLoading) setLoading(false)
                 } else {
                     batchStateUpdates {
-                        val merged = mergeNetworkHistoryWithShown(shown, response.messages)
+                        val merged = preserveReplyToFromExisting(
+                            shown,
+                            mergeNetworkHistoryWithShown(shown, response.messages),
+                        )
                         clearMessages()
                         addMessages(
                             ProfileCache.enrichPublicMessagesForDisplay(merged),
@@ -384,7 +398,9 @@ class PublicChatPanel(
                 val data = updateMessage.data ?: return
                 val editedMsg = json.decodeFromJsonElement(Message.serializer(), data)
                 DecryptedImageCache.invalidateForMessage(editedMsg.id)
-                updateMessage(editedMsg.id) { editedMsg }
+                updateMessage(editedMsg.id) { existing ->
+                    editedMsg.copy(reply_to = editedMsg.reply_to ?: existing.reply_to)
+                }
                 withContext(Dispatchers.Default) {
                     MessageCacheStore.replacePublicMessages(_state.messages)
                 }
@@ -394,6 +410,7 @@ class PublicChatPanel(
                 val deletedData = json.decodeFromJsonElement(MessageDeletedData.serializer(), data)
                 DecryptedImageCache.invalidateForMessage(deletedData.message_id)
                 removeMessage(deletedData.message_id)
+                clearReplyReferencesTo(deletedData.message_id)
                 withContext(Dispatchers.Default) {
                     MessageRepository.markPublicMessageDeleted(deletedData.message_id)
                     MessageCacheStore.replacePublicMessages(_state.messages)
@@ -468,10 +485,9 @@ class PublicChatPanel(
     }
 
     override suspend fun handleDeleteMessage(messageId: Int) {
-        // Remove immediately from UI
         deleteMessageImmediately(messageId)
+        clearReplyReferencesTo(messageId)
 
-        // Send delete request
         ApiClient.deleteMessage(messageId)
     }
 
