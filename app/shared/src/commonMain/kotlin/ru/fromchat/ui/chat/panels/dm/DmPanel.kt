@@ -588,8 +588,9 @@ class DmPanel(
             cancelQueuedMessage(queued)
             return
         }
-        val clientId = _state.messages.find { it.id == messageId }?.client_message_id
-        deleteMessageImmediately(messageId)
+        val message = _state.messages.find { it.id == messageId } ?: return
+        val clientId = message.client_message_id
+        beginMessageDissolve(message)
         DownloadedFileRegistry.invalidateForMessage(messageId)
         DecryptedImageCache.invalidateForMessage(messageId)
         DecryptedFileCache.invalidateForMessage(messageId)

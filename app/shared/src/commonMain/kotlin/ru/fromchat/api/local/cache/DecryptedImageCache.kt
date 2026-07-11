@@ -19,6 +19,8 @@ import ru.fromchat.api.local.download.ensureAttachmentDownloadActive
 import ru.fromchat.ui.chat.utils.AttachmentDownloadVisibility
 import ru.fromchat.api.local.cache.DecryptedImageCache.storageKey
 import ru.fromchat.api.local.download.LocalDecodedImageCache
+import ru.fromchat.api.local.download.ChatPreviewDecodeSize
+import ru.fromchat.api.local.download.decodeLocalImageFile
 
 /**
  * Disk + in-memory cache for decrypted DM images.
@@ -26,6 +28,7 @@ import ru.fromchat.api.local.download.LocalDecodedImageCache
  */
 object DecryptedImageCache {
     private const val SUBDIR = "decrypted_images"
+    private const val DISK_THUMB_SUFFIX = "_thumb.jpg"
 
     /** True when [uri] points at a file under this cache (safe to persist for offline preview). */
     fun isDecryptedImageCacheUri(uri: String?): Boolean {
@@ -93,13 +96,100 @@ object DecryptedImageCache {
         clientMessageId: String? = null,
     ): String? {
         val cid = clientMessageId?.trim()?.takeIf { it.isNotEmpty() }
+        // Always try the client-id key first — outbound seeds live there until aliasing.
         if (cid != null) {
+            readDisk(storageKey(-1, fileIndex, cid))?.let { return it }
+        }
+        if (messageId > 0) {
+            readDisk(storageKey(messageId, fileIndex, null))?.let { return it }
+        } else {
             readDisk(storageKey(messageId, fileIndex, cid))?.let { return it }
         }
-        return readDisk(storageKey(messageId, fileIndex, null))
+        return null
     }
 
     fun getUriForStorageKey(storageKey: String): String? = readDisk(storageKey)
+
+    /** Synchronous lookup for the tiny on-disk JPEG written with the full cache file. */
+    fun getCachedThumbUri(
+        messageId: Int,
+        fileIndex: Int,
+        clientMessageId: String? = null,
+    ): String? {
+        for (lookupKey in progressLookupKeys(messageId, fileIndex, clientMessageId)) {
+            readThumbDisk(lookupKey)?.let { return it }
+        }
+        return null
+    }
+
+    suspend fun ensureDiskThumbIfNeeded(
+        messageId: Int,
+        fileIndex: Int,
+        clientMessageId: String? = null,
+    ) {
+        if (getCachedThumbUri(messageId, fileIndex, clientMessageId) != null) return
+        withContext(Dispatchers.Default) {
+            cacheMutex.withLock {
+                for (lookupKey in progressLookupKeys(messageId, fileIndex, clientMessageId)) {
+                    val thumbPath = thumbDiskPath(lookupKey) ?: continue
+                    if (PlatformFileSystem.exists(thumbPath)) return@withContext
+                    val fullPath = diskPath(lookupKey)?.takeIf { PlatformFileSystem.exists(it) }
+                        ?: continue
+                    writeDiskThumbLocked(lookupKey, fullPath)
+                    return@withContext
+                }
+            }
+        }
+    }
+
+    suspend fun decodePlaceholderThumb(
+        memoryKey: String,
+        messageId: Int,
+        fileIndex: Int,
+        clientMessageId: String?,
+        serverThumbBytes: ByteArray?,
+    ): androidx.compose.ui.graphics.ImageBitmap? = withContext(Dispatchers.Default) {
+        peekPlaceholderThumb(memoryKey, messageId, fileIndex, clientMessageId)?.let {
+            return@withContext it
+        }
+        // Prefer server base64 before generating a disk thumb from a huge full file.
+        val thumbBytes = serverThumbBytes?.takeIf { it.isNotEmpty() }
+        if (thumbBytes != null) {
+            val target = ChatPreviewDecodeSize(
+                ATTACHMENT_DISK_THUMB_MAX_EDGE_PX,
+                ATTACHMENT_DISK_THUMB_MAX_EDGE_PX,
+            )
+            LocalDecodedImageCache.loadThumb(memoryKey, thumbBytes, target)?.let {
+                return@withContext it
+            }
+        }
+        ensureDiskThumbIfNeeded(messageId, fileIndex, clientMessageId)
+        peekPlaceholderThumb(memoryKey, messageId, fileIndex, clientMessageId)
+    }
+
+    /** Sync disk/memory thumb for first composition (avoids empty tile before produceState). */
+    fun peekPlaceholderThumb(
+        memoryKey: String,
+        messageId: Int,
+        fileIndex: Int,
+        clientMessageId: String?,
+    ): androidx.compose.ui.graphics.ImageBitmap? {
+        LocalDecodedImageCache.peekThumb(memoryKey)?.let { return it }
+        getCachedThumbUri(messageId, fileIndex, clientMessageId)?.let { uri ->
+            val path = uri.removePrefix("file://")
+            if (path.isNotEmpty()) {
+                val target = ChatPreviewDecodeSize(
+                    ATTACHMENT_DISK_THUMB_MAX_EDGE_PX,
+                    ATTACHMENT_DISK_THUMB_MAX_EDGE_PX,
+                )
+                decodeLocalImageFile(path, target.widthPx, target.heightPx)?.let { bitmap ->
+                    LocalDecodedImageCache.putThumb(memoryKey, bitmap)
+                    return bitmap
+                }
+            }
+        }
+        return null
+    }
 
     fun messageIdFromStorageKey(storageKey: String): Int? {
         if (!storageKey.startsWith("img_") || storageKey.startsWith("img_c_")) return null
@@ -116,7 +206,7 @@ object DecryptedImageCache {
         val idKey = storageKey(messageId, fileIndex, null)
         if (readDisk(idKey) != null) return
         val cid = clientMessageId?.trim()?.takeIf { it.isNotEmpty() } ?: return
-        val cidKey = storageKey(messageId, fileIndex, cid)
+        val cidKey = storageKey(-1, fileIndex, cid)
         val sourceUri = readDisk(cidKey) ?: return
         val bytes = runCatching {
             readOutboundFileBytes(sourceUri)
@@ -126,13 +216,16 @@ object DecryptedImageCache {
             cacheMutex.withLock {
                 if (readDisk(idKey) == null) {
                     writeCacheLocked(idKey, bytes)
-                    AttachmentMediaLog.diskCache(
-                        "alias_ok",
-                        "from" to cidKey,
-                        "to" to idKey,
-                        "bytes" to bytes.size,
-                    )
                 }
+                diskPath(idKey)?.let { fullPath ->
+                    writeDiskThumbLocked(idKey, fullPath)
+                }
+                AttachmentMediaLog.diskCache(
+                    "alias_ok",
+                    "from" to cidKey,
+                    "to" to idKey,
+                    "bytes" to bytes.size,
+                )
             }
         }
     }
@@ -234,6 +327,178 @@ object DecryptedImageCache {
         return uri
     }
 
+    /**
+     * Downloads a plain (non-encrypted) public attachment into the image cache.
+     * Reuses the resumable Range download path without decrypt.
+     */
+    suspend fun getOrDownloadPlain(
+        messageId: Int,
+        fileIndex: Int,
+        file: DmFile,
+        clientMessageId: String? = null,
+        messageLabel: String? = null,
+    ): String? {
+        val key = storageKey(messageId, fileIndex, clientMessageId)
+        getCached(messageId, fileIndex, clientMessageId)?.let { uri ->
+            AttachmentMediaLog.diskCache(
+                "getOrDownloadPlain_hit",
+                "key" to key,
+                "msgId" to messageId,
+                "uri" to uri,
+            )
+            return uri
+        }
+        cacheMutex.withLock { resolveUriLocked(key) }?.let { return it }
+
+        val label = AttachmentMediaLog.messageLabel(messageLabel)
+        AttachmentDownloadNotifier.beginDownload(
+            messageId = messageId,
+            fileIndex = fileIndex,
+            clientMessageId = clientMessageId,
+        )
+        val uri = withContext(Dispatchers.Default) {
+            runCatching {
+                AttachmentDownloadScheduler.run(
+                    storageKey = key,
+                    messageId = messageId,
+                    work = {
+                        downloadPlainAndPersist(
+                            key = key,
+                            messageId = messageId,
+                            fileIndex = fileIndex,
+                            clientMessageId = clientMessageId,
+                            file = file,
+                            messageLabel = label,
+                        )
+                    },
+                )
+            }.onFailure { error ->
+                if (error !is CancellationException) {
+                    ApiClient.clearPartialEncryptedDownload(key)
+                    AttachmentDownloadNotifier.emit(
+                        AttachmentDownloadProgress.Failed(
+                            storageKey = key,
+                            error = error.message ?: "download_failed",
+                        ),
+                        messageLabel = label,
+                        messageId = messageId,
+                        fileIndex = fileIndex,
+                        clientMessageId = clientMessageId,
+                    )
+                }
+            }.getOrNull()
+        }
+        if (uri != null && messageId > 0) {
+            ensureDiskAliasForMessageId(messageId, fileIndex, clientMessageId)
+        }
+        return uri
+    }
+
+    private suspend fun downloadPlainAndPersist(
+        key: String,
+        messageId: Int,
+        fileIndex: Int,
+        clientMessageId: String?,
+        file: DmFile,
+        messageLabel: String?,
+    ): String? {
+        ensureAttachmentDownloadActive(key)
+        cacheMutex.withLock { resolveUriLocked(key) }?.let { return it }
+        AttachmentDownloadNotifier.emit(
+            AttachmentDownloadProgress.InProgress(key, 1),
+            messageLabel = messageLabel,
+            messageId = messageId,
+            fileIndex = fileIndex,
+            clientMessageId = clientMessageId,
+        )
+        val t0 = AttachmentMediaLog.nowMs()
+        val outputPath = diskPath(key)
+        if (outputPath == null) {
+            ApiClient.clearPartialEncryptedDownload(key)
+            AttachmentDownloadNotifier.emit(
+                AttachmentDownloadProgress.Failed(key, "cache_write_failed"),
+                messageLabel = messageLabel,
+                messageId = messageId,
+                fileIndex = fileIndex,
+                clientMessageId = clientMessageId,
+            )
+            return null
+        }
+        val downloaded = runCatching {
+            ApiClient.fetchEncryptedFileResumable(
+                path = file.path,
+                resumeKey = key,
+                onProgress = { percent ->
+                    checkAttachmentDownloadActive(key)
+                    AttachmentDownloadNotifier.emit(
+                        AttachmentDownloadProgress.InProgress(key, percent.coerceIn(0, 100)),
+                        messageLabel = messageLabel,
+                        messageId = messageId,
+                        fileIndex = fileIndex,
+                        clientMessageId = clientMessageId,
+                    )
+                },
+            )
+        }.onFailure { error ->
+            if (error is CancellationException) throw error
+            ApiClient.clearPartialEncryptedDownload(key)
+            AttachmentDownloadNotifier.emit(
+                AttachmentDownloadProgress.Failed(key, error.message ?: "download_failed"),
+                messageLabel = messageLabel,
+                messageId = messageId,
+                fileIndex = fileIndex,
+                clientMessageId = clientMessageId,
+            )
+        }.getOrNull() ?: return null
+
+        ensureAttachmentDownloadActive(key)
+        if (downloaded.path != outputPath) {
+            runCatching {
+                copyOutboundFileToPath("file://${downloaded.path}", outputPath)
+            }.onFailure {
+                ApiClient.clearPartialEncryptedDownload(key)
+                AttachmentDownloadNotifier.emit(
+                    AttachmentDownloadProgress.Failed(key, "cache_write_failed"),
+                    messageLabel = messageLabel,
+                    messageId = messageId,
+                    fileIndex = fileIndex,
+                    clientMessageId = clientMessageId,
+                )
+                return null
+            }
+        }
+        ApiClient.clearPartialEncryptedDownload(key)
+        val uri = cacheMutex.withLock {
+            resolveUriLocked(key) ?: commitCachePathLocked(key, outputPath)
+        }
+        if (uri == null) {
+            AttachmentDownloadNotifier.emit(
+                AttachmentDownloadProgress.Failed(key, "cache_write_failed"),
+                messageLabel = messageLabel,
+                messageId = messageId,
+                fileIndex = fileIndex,
+                clientMessageId = clientMessageId,
+            )
+            return null
+        }
+        AttachmentMediaLog.download(
+            "plain_persist_ok",
+            "key" to key,
+            "bytes" to downloaded.sizeBytes,
+            "ms" to (AttachmentMediaLog.nowMs() - t0),
+            "uri" to uri,
+            "msg" to messageLabel,
+        )
+        AttachmentDownloadNotifier.emit(
+            AttachmentDownloadProgress.Success(storageKey = key, messageId = messageId),
+            messageLabel = messageLabel,
+            messageId = messageId,
+            fileIndex = fileIndex,
+            clientMessageId = clientMessageId,
+        )
+        return uri
+    }
+
     suspend fun invalidateForMessage(messageId: Int) {
         val dir = ensureCacheDir() ?: return
         withContext(Dispatchers.Default) {
@@ -272,6 +537,7 @@ object DecryptedImageCache {
         withContext(Dispatchers.Default) {
             cacheMutex.withLock { memoryCache.remove(key) }
             diskPath(key)?.let { invalidatePath(it) }
+            thumbDiskPath(key)?.let { invalidatePath(it) }
             LocalDecodedImageCache.evict(key)
         }
     }
@@ -470,6 +736,23 @@ object DecryptedImageCache {
         return "$dir/$storageKey"
     }
 
+    private fun thumbDiskPath(storageKey: String): String? {
+        val dir = ensureCacheDir() ?: return null
+        return "$dir/$storageKey$DISK_THUMB_SUFFIX"
+    }
+
+    private fun readThumbDisk(storageKey: String): String? {
+        val path = thumbDiskPath(storageKey) ?: return null
+        if (!PlatformFileSystem.exists(path)) return null
+        return "file://$path"
+    }
+
+    private fun writeDiskThumbLocked(storageKey: String, sourceAbsolutePath: String) {
+        val dest = thumbDiskPath(storageKey) ?: return
+        if (PlatformFileSystem.exists(dest)) return
+        generateAttachmentDiskThumbnail(sourceAbsolutePath, dest, ATTACHMENT_DISK_THUMB_MAX_EDGE_PX)
+    }
+
     private fun readDisk(storageKey: String): String? {
         val path = diskPath(storageKey) ?: return null
         if (!PlatformFileSystem.exists(path)) return null
@@ -484,6 +767,7 @@ object DecryptedImageCache {
             if (!PlatformFileSystem.exists(path)) return null
             val uri = "file://$path"
             memoryCache[storageKey] = uri
+            writeDiskThumbLocked(storageKey, path)
             uri
         }.getOrElse {
             invalidatePath(path)
@@ -495,6 +779,7 @@ object DecryptedImageCache {
         if (!PlatformFileSystem.exists(path)) return null
         val uri = "file://$path"
         memoryCache[storageKey] = uri
+        writeDiskThumbLocked(storageKey, path)
         return uri
     }
 

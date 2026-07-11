@@ -25,7 +25,7 @@ object AttachmentUploadNotifier {
                     "msg" to msg,
                 )
             is AttachmentUploadProgress.InProgress -> {
-                if (progress.percent == 1 || progress.percent % 10 == 0 || progress.percent >= 95) {
+                if (progress.percent == 1 || progress.percent % 5 == 0 || progress.percent >= 95) {
                     AttachmentMediaLog.upload(
                         "progress",
                         "job" to progress.jobId,
@@ -33,20 +33,36 @@ object AttachmentUploadNotifier {
                         "file" to progress.filename,
                         "msg" to msg,
                     )
+                    AttachmentMediaLog.send(
+                        "upload_progress",
+                        "job" to progress.jobId.take(12),
+                        "pct" to progress.percent,
+                    )
                 }
             }
-            is AttachmentUploadProgress.Success ->
+            is AttachmentUploadProgress.Success -> {
                 AttachmentMediaLog.upload("success", "job" to progress.jobId, "msg" to msg)
-            is AttachmentUploadProgress.Failed ->
+                AttachmentMediaLog.send("upload_success", "job" to progress.jobId.take(12))
+            }
+            is AttachmentUploadProgress.Failed -> {
                 AttachmentMediaLog.upload(
                     "failed",
                     "job" to progress.jobId,
                     "err" to progress.error,
                     "msg" to msg,
                 )
+                AttachmentMediaLog.send(
+                    "upload_failed",
+                    "job" to progress.jobId.take(12),
+                    "err" to progress.error,
+                )
+            }
         }
-        mainScope.launch {
-            _progressFlow.emit(progress)
+        // Prefer immediate delivery so the determinate indicator tracks chunks.
+        if (!_progressFlow.tryEmit(progress)) {
+            mainScope.launch {
+                _progressFlow.emit(progress)
+            }
         }
     }
 }

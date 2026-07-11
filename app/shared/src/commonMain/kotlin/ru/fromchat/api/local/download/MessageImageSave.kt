@@ -11,6 +11,8 @@ import ru.fromchat.api.schema.messages.Message
 import ru.fromchat.api.local.cache.readOutboundFileBytes
 import ru.fromchat.api.local.mimeTypeForFilename
 import ru.fromchat.ui.chat.isImageFilename
+import ru.fromchat.ui.chat.utils.attachmentDecodeCacheKeys
+import ru.fromchat.ui.chat.utils.peekDecodedAttachmentBitmap
 
 data class SavableMessageImage(
     val fileIndex: Int,
@@ -25,13 +27,20 @@ fun mimeTypeForImageFilename(filename: String): String = mimeTypeForFilename(fil
 fun isMessageImageFullyLoaded(message: Message, fileIndex: Int): Boolean {
     val file = message.files?.getOrNull(fileIndex)
     if (file != null && isImageFilename(file.name)) {
-        if (message.dmEnvelope != null) {
-            return DecryptedImageCache.getCached(
+        val cacheKeys = attachmentDecodeCacheKeys(
+            messageId = message.id,
+            fileIndex = fileIndex,
+            clientMessageId = message.client_message_id,
+        )
+        if (DecryptedImageCache.getCached(
                 messageId = message.id,
                 fileIndex = fileIndex,
                 clientMessageId = message.client_message_id,
             ) != null
+        ) {
+            return true
         }
+        if (peekDecodedAttachmentBitmap(cacheKeys) != null) return true
         return false
     }
     if (fileIndex != 0) return false

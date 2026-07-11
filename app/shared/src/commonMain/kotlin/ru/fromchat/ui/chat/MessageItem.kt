@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -59,9 +60,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import ru.fromchat.Logger
+import ru.fromchat.api.local.AttachmentMediaLog
 import ru.fromchat.Res
 import ru.fromchat.api.local.cache.DecryptedImageCache
 import ru.fromchat.api.local.db.store.ProfileCache
@@ -95,10 +98,13 @@ internal fun isFilenameOnlyMessageCaption(message: Message): Boolean {
 private fun isMessageCorrupted(message: Message): Boolean {
     val files = message.files ?: return false
     return files.withIndex().any { (index, file) ->
-        isImageFilename(file.name) && (
-            message.dmEnvelope == null ||
+        if (!isImageFilename(file.name)) return@any false
+        val isPlainPublic = message.dmEnvelope == null &&
+            (file.path.contains("/normal/") ||
+                (file.nonceB64.isNullOrBlank() && file.wrappedMekB64.isNullOrBlank()))
+        if (isPlainPublic) return@any false
+        message.dmEnvelope == null ||
             message.fileThumbnails?.getOrNull(index)?.isBlank() != false
-        )
     }
 }
 
@@ -154,6 +160,9 @@ fun MessageItem(
     showTimestamp: Boolean = true,
     onBubbleTap: (() -> Unit)? = null,
     enterAnimationRole: EnterAnimationRole = EnterAnimationRole.None,
+    /** When true, fade out and collapse layout space before removal. */
+    isExiting: Boolean = false,
+    onExitAnimationFinished: (() -> Unit)? = null,
 ) {
     val isCorrupted = remember(message.files, message.fileThumbnails, message.dmEnvelope) {
         isMessageCorrupted(message)
@@ -262,7 +271,8 @@ fun MessageItem(
             enterScale.snapTo(0f)
         }
     }
-    val runEnterAnimation = enterStarted && !enterFinished
+    val runEnterAnimation = enterStarted && !enterFinished && !isExiting
+    val shrinkLayoutForEnter = isNewEnterRole && runEnterAnimation
     // Single effect: start the spring as soon as this bubble is marked for enter.
     LaunchedEffect(enterIdentity, runEnterAnimation) {
         if (!runEnterAnimation) return@LaunchedEffect
@@ -285,6 +295,17 @@ fun MessageItem(
             "spring_end identity=${enterIdentity.take(12)} role=${enterAnimationRole.name}",
         )
     }
+    val exitAlpha = remember(enterIdentity) { Animatable(1f) }
+    val layoutCollapse = remember(enterIdentity) { Animatable(1f) }
+    LaunchedEffect(enterIdentity, isExiting) {
+        if (!isExiting) return@LaunchedEffect
+        enterFinished = true
+        coroutineScope {
+            launch { exitAlpha.animateTo(0f, tween(MessageExitFadeMs)) }
+            launch { layoutCollapse.animateTo(0f, tween(MessageExitCollapseMs)) }
+        }
+        onExitAnimationFinished?.invoke()
+    }
     LaunchedEffect(enterIdentity, enterAnimationRole, showSendingIndicator, sendFailed) {
         when (enterAnimationRole) {
             EnterAnimationRole.PreviousLast -> {
@@ -295,7 +316,7 @@ fun MessageItem(
             }
             EnterAnimationRole.NewMessage -> Unit
             else -> {
-                if (!runEnterAnimation && enterScale.value != 1f) {
+                if (!isExiting && !runEnterAnimation && enterScale.value != 1f) {
                     enterScale.snapTo(1f)
                 }
                 timestampForceAlpha.snapTo(1f)
@@ -398,12 +419,15 @@ fun MessageItem(
             modifier = Modifier
                 .fillMaxWidth()
                 .onGloballyPositioned { rowLayoutCoords = it }
+                .graphicsLayer {
+                    alpha = if (isExiting) exitAlpha.value else 1f
+                }
                 .then(rowLongPress)
                 .padding(horizontal = 8.dp)
                 .enterLayoutHeight(
-                    scale = enterScale.value,
+                    scale = if (isExiting) layoutCollapse.value else enterScale.value,
                     minHeightPx = minEnterHeightPx,
-                    active = runEnterAnimation,
+                    active = shrinkLayoutForEnter || isExiting,
                 ),
             horizontalArrangement = if (isAuthor) Arrangement.End else Arrangement.Start,
             verticalAlignment = Alignment.Bottom,
@@ -701,6 +725,37 @@ fun MessageItem(
                                                 (primaryFile != null && !primaryIsImage)
                                             if (showPrimaryImageSlot) {
                                                 val imageKey = imageAttachmentKey(message, 0)
+                                                val layoutAspect = imageAspectRatioForMessage(
+                                                    fileAspectRatios = message.fileAspectRatios,
+                                                    fileDimensions = message.fileDimensions,
+                                                    pendingFileAspectRatio = message.pendingFileAspectRatio,
+                                                    fileAspectRatioPairs = message.fileAspectRatioPairs,
+                                                    fileIndex = 0,
+                                                    confirmed = message.id > 0,
+                                                    hasLocalPreview = !message.pendingFileUri.isNullOrBlank(),
+                                                )
+                                                LaunchedEffect(
+                                                    message.id,
+                                                    message.client_message_id,
+                                                    layoutAspect,
+                                                    message.fileAspectRatioPairs,
+                                                    message.fileDimensions,
+                                                    message.pendingFileAspectRatio,
+                                                    message.pendingFileUri,
+                                                    message.files?.firstOrNull()?.path,
+                                                ) {
+                                                    AttachmentMediaLog.aspect(
+                                                        "tile_state",
+                                                        "msgId" to message.id,
+                                                        "clientId" to message.client_message_id?.take(12),
+                                                        "layoutAspect" to layoutAspect,
+                                                        "pairs" to message.fileAspectRatioPairs?.firstOrNull(),
+                                                        "dims" to message.fileDimensions?.firstOrNull(),
+                                                        "pendingAspect" to message.pendingFileAspectRatio,
+                                                        "pendingUri" to message.pendingFileUri?.take(48),
+                                                        "file" to message.files?.firstOrNull()?.path?.takeLast(32),
+                                                    )
+                                                }
                                                 val awaitingServer =
                                                     message.id < 0 && message.files.isNullOrEmpty()
                                                 val isOutboundPendingImage =
@@ -723,19 +778,7 @@ fun MessageItem(
                                                     fileThumbnail = message.fileThumbnails
                                                         ?.firstOrNull()
                                                         ?.takeIf { it.isNotBlank() },
-                                                    fileAspectRatio = imageAspectRatioForMessage(
-                                                        fileAspectRatios = message.fileAspectRatios,
-                                                        fileDimensions = message.fileDimensions,
-                                                        pendingFileAspectRatio =
-                                                            message.pendingFileAspectRatio,
-                                                        fileIndex = 0,
-                                                        confirmed = message.id > 0,
-                                                        hasLocalPreview =
-                                                            DecryptedImageCache
-                                                                .isDecryptedImageCacheUri(
-                                                                    message.pendingFileUri,
-                                                                ),
-                                                    ),
+                                                    fileAspectRatio = layoutAspect,
                                                     fileSizeBytes =
                                                         message.fileSizes?.firstOrNull(),
                                                     messageId = message.id,
@@ -845,6 +888,7 @@ fun MessageItem(
                                                         fileDimensions = message.fileDimensions,
                                                         pendingFileAspectRatio =
                                                             message.pendingFileAspectRatio,
+                                                        fileAspectRatioPairs = message.fileAspectRatioPairs,
                                                         fileIndex = index,
                                                         confirmed = message.id > 0,
                                                         hasLocalPreview = index == 0 &&

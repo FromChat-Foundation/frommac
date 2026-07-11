@@ -80,7 +80,10 @@ import ru.fromchat.api.local.messages.formatMessageDateTimeLocal
 import ru.fromchat.api.schema.messages.Message
 import ru.fromchat.back
 import ru.fromchat.more
+import ru.fromchat.api.local.send.previewSeedDecodeSize
+import ru.fromchat.ui.chat.utils.attachmentDecodeCacheKeys
 import ru.fromchat.ui.chat.utils.imageAspectRatioForMessage
+import ru.fromchat.ui.chat.utils.peekDecodedAttachmentBitmap
 import ru.fromchat.ui.components.BackHandler
 import ru.fromchat.ui.components.Text
 import kotlin.math.abs
@@ -124,29 +127,39 @@ fun ImageFullscreenPreview(
     val envelope = message.dmEnvelope
 
     val cacheClientId = message.client_message_id?.trim()?.takeIf { it.isNotEmpty() }
-    val decryptCacheKey = remember(message.id, fileIndex, cacheClientId) {
-        DecryptedImageCache.storageKey(message.id, fileIndex, cacheClientId)
+    val decodeCacheKeys = remember(message.id, fileIndex, cacheClientId) {
+        attachmentDecodeCacheKeys(message.id, fileIndex, cacheClientId)
     }
-    val fsCacheKey = remember(decryptCacheKey) {
+    val bitmapStateKey = remember(decodeCacheKeys) { decodeCacheKeys.joinToString("|") }
+    val decryptCacheKey = decodeCacheKeys.first()
+    val fsCacheKey = remember(bitmapStateKey) {
         LocalDecodedImageCache.fullscreenCacheKey(decryptCacheKey)
     }
-    var cachedPath by remember(decryptCacheKey) {
+    var cachedPath by remember(bitmapStateKey) {
         mutableStateOf(DecryptedImageCache.getCached(message.id, fileIndex, cacheClientId))
     }
-    var previewBitmap by remember(decryptCacheKey) {
-        mutableStateOf(LocalDecodedImageCache.peekFull(decryptCacheKey))
+    var previewBitmap by remember(bitmapStateKey) {
+        mutableStateOf(peekDecodedAttachmentBitmap(decodeCacheKeys))
     }
-    var fullscreenBitmap by remember(fsCacheKey) {
-        mutableStateOf(LocalDecodedImageCache.peekFullscreen(decryptCacheKey))
+    var fullscreenBitmap by remember(bitmapStateKey) {
+        mutableStateOf(
+            decodeCacheKeys.firstNotNullOfOrNull { key ->
+                LocalDecodedImageCache.peekFullscreen(key)
+            },
+        )
     }
     val hasInstantBitmap = previewBitmap != null || fullscreenBitmap != null
-    val openAspectFromBitmap = previewBitmap?.let { it.width.toFloat() / it.height.toFloat() }
+    val openAspectFromBitmap = (fullscreenBitmap ?: previewBitmap)?.let {
+        it.width.toFloat() / it.height.toFloat()
+    }
     val layoutAspectHint = imageAspectRatioForMessage(
         fileAspectRatios = message.fileAspectRatios,
         fileDimensions = message.fileDimensions,
         pendingFileAspectRatio = message.pendingFileAspectRatio,
+        fileAspectRatioPairs = message.fileAspectRatioPairs,
         fileIndex = fileIndex,
         confirmed = message.id > 0,
+        hasLocalPreview = !message.pendingFileUri.isNullOrBlank() || cachedPath != null,
     )
     var animationBounds by remember(decryptCacheKey) { mutableStateOf<Rect?>(null) }
     if (animationBounds == null && thumbnailBounds != null) {
@@ -158,7 +171,7 @@ fun ImageFullscreenPreview(
     var menusVisible by remember { mutableStateOf(true) }
     var dismissRequested by remember { mutableStateOf(false) }
     val backgroundAlpha = remember { Animatable(1f) }
-    var hasPlayedOpenAnimation by remember(decryptCacheKey) { mutableStateOf(false) }
+    var hasPlayedOpenAnimation by remember(bitmapStateKey) { mutableStateOf(false) }
     var isOpenAnimationPlaying by remember { mutableStateOf(false) }
     var dismissProgress by remember { mutableStateOf(0f) }
     val isInitialOpenState = animationBounds != null && !hasPlayedOpenAnimation
@@ -205,18 +218,56 @@ fun ImageFullscreenPreview(
                 )
             }
 
-            LaunchedEffect(decryptCacheKey, fsCacheKey, fullscreenDecodeSize) {
-                val uri = cachedPath ?: DecryptedImageCache.getCached(message.id, fileIndex, cacheClientId)
-                    ?: DecryptedImageCache.getOrDecrypt(
-                        messageId = message.id,
-                        fileIndex = fileIndex,
-                        file = file,
-                        envelope = envelope,
-                        currentUserId = currentUserId,
-                        clientMessageId = cacheClientId,
-                        messageLabel = message.content,
-                    ).also { cachedPath = it }
+            LaunchedEffect(bitmapStateKey, fsCacheKey, fullscreenDecodeSize, layoutAspectHint) {
+                if (previewBitmap == null) {
+                    peekDecodedAttachmentBitmap(decodeCacheKeys)?.let { previewBitmap = it }
+                }
+                val existingUri = cachedPath
+                    ?: DecryptedImageCache.getCached(message.id, fileIndex, cacheClientId)
+                if (previewBitmap == null && existingUri != null) {
+                    cachedPath = existingUri
+                    val quick = withContext(Dispatchers.Default) {
+                        LocalDecodedImageCache.loadFull(
+                            decryptCacheKey,
+                            existingUri.removePrefix("file://"),
+                            previewSeedDecodeSize(layoutAspectHint),
+                        )
+                    }
+                    if (quick != null) previewBitmap = quick
+                }
+                val uri = cachedPath ?: (
+                    if (envelope != null) {
+                        DecryptedImageCache.getOrDecrypt(
+                            messageId = message.id,
+                            fileIndex = fileIndex,
+                            file = file,
+                            envelope = envelope,
+                            currentUserId = currentUserId,
+                            clientMessageId = cacheClientId,
+                            messageLabel = message.content,
+                        )
+                    } else {
+                        DecryptedImageCache.getOrDownloadPlain(
+                            messageId = message.id,
+                            fileIndex = fileIndex,
+                            file = file,
+                            clientMessageId = cacheClientId,
+                            messageLabel = message.content,
+                        )
+                    }
+                )?.also { cachedPath = it }
                 if (uri == null) return@LaunchedEffect
+                if (previewBitmap == null) {
+                    val tilePreview = withContext(Dispatchers.Default) {
+                        LocalDecodedImageCache.loadFull(
+                            decryptCacheKey,
+                            uri.removePrefix("file://"),
+                            previewSeedDecodeSize(layoutAspectHint),
+                        )
+                    }
+                    if (tilePreview != null) previewBitmap = tilePreview
+                }
+                if (fullscreenBitmap != null) return@LaunchedEffect
                 val hiRes = withContext(Dispatchers.Default) {
                     LocalDecodedImageCache.loadFullscreen(decryptCacheKey, uri, fullscreenDecodeSize)
                 }
@@ -226,17 +277,12 @@ fun ImageFullscreenPreview(
             }
 
             val displayBitmap = fullscreenBitmap ?: previewBitmap
-            val displayAspect = displayBitmap?.let { bmp ->
-                bmp.width.toFloat() / bmp.height.toFloat()
-            } ?: message.fileAspectRatios?.getOrNull(fileIndex)?.takeIf { it > 0f }
-            val contentHeightAtScale1 = if (displayAspect != null) {
-                containerWidth / displayAspect
-            } else {
-                containerHeight
-            }
+            val hasLocalFile = cachedPath != null ||
+                !message.pendingFileUri.isNullOrBlank() ||
+                DecryptedImageCache.getCached(message.id, fileIndex, cacheClientId) != null
 
             when {
-                displayBitmap == null -> {
+                displayBitmap == null && !hasLocalFile -> {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -253,6 +299,9 @@ fun ImageFullscreenPreview(
                     )
                 }
                 else -> {
+                    val displayAspect = displayBitmap?.let { bmp ->
+                        bmp.width.toFloat() / bmp.height.toFloat()
+                    }
                     val layoutAspect = openAspectFromBitmap
                         ?: thumbLayoutAspect
                         ?: layoutAspectHint
@@ -260,7 +309,7 @@ fun ImageFullscreenPreview(
                     val layoutContentHeight = if (layoutAspect != null) {
                         containerWidth / layoutAspect
                     } else {
-                        contentHeightAtScale1
+                        containerHeight
                     }
                     val initial = remember(
                         animationBounds, containerWidth, containerHeight, layoutContentHeight,
@@ -635,22 +684,26 @@ fun ImageFullscreenPreview(
                                 .then(sharedElementModifier)
                                 .offset { IntOffset(offsetXAnim.value.roundToInt(), offsetYAnim.value.roundToInt()) }
                         ) {
-                            FullscreenBitmapImage(
-                                bitmap = displayBitmap,
-                                contentDescription = file.name,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .graphicsLayer {
-                                        scaleX = scaleAnim.value
-                                        scaleY = scaleAnim.value
-                                        translationX = offsetXAnim.value - offsetXAnim.value.roundToInt()
-                                        translationY = offsetYAnim.value - offsetYAnim.value.roundToInt()
-                                        val scale = maxOf(scaleAnim.value, 0.01f)
-                                        shape = androidx.compose.foundation.shape.RoundedCornerShape((cornerRadiusAnim.value / scale).dp)
-                                        clip = true
-                                    },
-                                contentScale = ContentScale.Fit
-                            )
+                            displayBitmap?.let { bmp ->
+                                FullscreenBitmapImage(
+                                    bitmap = bmp,
+                                    contentDescription = file.name,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            scaleX = scaleAnim.value
+                                            scaleY = scaleAnim.value
+                                            translationX = offsetXAnim.value - offsetXAnim.value.roundToInt()
+                                            translationY = offsetYAnim.value - offsetYAnim.value.roundToInt()
+                                            val scale = maxOf(scaleAnim.value, 0.01f)
+                                            shape = androidx.compose.foundation.shape.RoundedCornerShape(
+                                                (cornerRadiusAnim.value / scale).dp,
+                                            )
+                                            clip = true
+                                        },
+                                    contentScale = ContentScale.Fit,
+                                )
+                            }
                         }
                     }
                 }

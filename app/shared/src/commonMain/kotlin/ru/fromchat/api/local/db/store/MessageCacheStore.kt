@@ -24,15 +24,19 @@ import ru.fromchat.api.local.messages.conversationIdForGroup
 import ru.fromchat.api.local.messages.dmOtherUserIdFromConversationId
 import ru.fromchat.api.local.db.encodeOptimisticOutboundMessage
 import ru.fromchat.api.local.db.encodePersistedDmMessage
+import ru.fromchat.api.local.db.encodePersistedPublicMessage
 import ru.fromchat.api.local.db.parseDmMessageContent
+import ru.fromchat.api.local.db.hydrateAttachmentPreviewFromDiskSync
 import ru.fromchat.api.local.db.resolveLocalPreviewUri
 import ru.fromchat.api.local.messages.sortMessagesForChatDisplay
 import ru.fromchat.api.local.send.DmAttachmentOutboxPayload
+import ru.fromchat.api.local.send.PublicAttachmentOutboxPayload
 import ru.fromchat.api.local.send.SEND_ERROR_FAILED
 import ru.fromchat.api.local.send.OutgoingMessageCoordinator
 import ru.fromchat.api.schema.messages.Message
 import ru.fromchat.api.schema.messages.dm.DmConversation
 import ru.fromchat.api.schema.messages.dm.DmEnvelope
+import ru.fromchat.api.schema.messages.publicchat.resolvePublicAttachmentLayout
 import ru.fromchat.api.local.cache.CacheContext
 import ru.fromchat.api.local.cache.CacheValidator
 import ru.fromchat.db.Conversation
@@ -42,6 +46,7 @@ import ru.fromchat.api.local.cache.DecryptedFileCache
 import ru.fromchat.api.local.cache.DecryptedImageCache
 import ru.fromchat.api.local.download.DownloadedFileRegistry
 import ru.fromchat.ui.chat.utils.attachPublicReplyReferences
+import ru.fromchat.ui.chat.isImageFilename
 import ru.fromchat.ui.chat.utils.dedupeMessagesByClientId
 import ru.fromchat.ui.chat.utils.dropSupersededOptimisticMessages
 import kotlin.concurrent.Volatile
@@ -74,22 +79,29 @@ object MessageCacheStore {
         return if (t.length > maxLen) t.take(maxLen) + "\u2026" else t
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun observeMessages(instanceId: String, conversationId: String): Flow<List<Message>> =
         db.messageDatabaseQueries
             .selectMessagesByConversation(instanceId, conversationId)
             .asFlow()
             .mapToList(Dispatchers.Default)
-            .map { rows ->
-                val raw = hydrateReplyReferencesFromRows(rows)
-                val withoutSuperseded = dropSupersededOptimisticMessages(raw, ApiClient.user?.id)
-                sortMessagesForChatDisplay(
-                    validatedOrEmpty(
-                        conversationId,
-                        dedupeMessagesByClientId(
-                            enrichQueuedOutboundUi(withoutSuperseded, conversationId),
+            .mapLatest { rows ->
+                withContext(Dispatchers.Default) {
+                    val raw = hydrateReplyReferencesFromRows(rows)
+                    val withoutSuperseded = dropSupersededOptimisticMessages(raw, ApiClient.user?.id)
+                    val hydrated = hydrateAttachmentPreviewsFromDisk(withoutSuperseded)
+                    sortMessagesForChatDisplay(
+                        validatedOrEmpty(
+                            conversationId,
+                            dedupeMessagesByClientId(
+                                enrichQueuedOutboundUi(
+                                    hydrated,
+                                    conversationId,
+                                ),
+                            ),
                         ),
-                    ),
-                )
+                    )
+                }
             }
 
     suspend fun loadPublicMessages(): List<Message> =
@@ -106,12 +118,13 @@ object MessageCacheStore {
             .executeAsList()
         val raw = hydrateReplyReferencesFromRows(rows).reversed()
         val withoutSuperseded = dropSupersededOptimisticMessages(raw, ApiClient.user?.id)
+        val withDiskPreviews = withoutSuperseded.map { hydrateAttachmentPreviewFromDiskSync(it) }
         return ProfileCache.enrichPublicMessagesForDisplay(
             sortMessagesForChatDisplay(
                 validatedOrEmpty(
                     convId,
                     dedupeMessagesByClientId(
-                        enrichQueuedOutboundUi(withoutSuperseded, convId),
+                        enrichQueuedOutboundUi(withDiskPreviews, convId),
                     ),
                 ),
             ),
@@ -153,15 +166,16 @@ object MessageCacheStore {
     }
 
     suspend fun replacePublicMessages(messages: List<Message>) {
-        ProfileCache.mergePreviewFromPublicMessages(messages)
+        val resolved = messages.map { it.resolvePublicAttachmentLayout() }
+        ProfileCache.mergePreviewFromPublicMessages(resolved)
         conversationIdForPublic().let {
             replaceMessages(
                 it,
                 sortMessagesForChatDisplay(
                     dedupeMessagesByClientId(
-                        messages + loadPendingMessages(it).filter { p ->
+                        resolved + loadPendingMessages(it).filter { p ->
                             val cid = p.client_message_id
-                            cid == null || messages.none { it.client_message_id == cid }
+                            cid == null || resolved.none { it.client_message_id == cid }
                         }
                     )
                 )
@@ -230,8 +244,9 @@ object MessageCacheStore {
     }
 
     suspend fun upsertPublicMessage(message: Message) {
-        ProfileCache.mergePreviewFromPublicMessage(message)
-        upsertSingle(conversationIdForPublic(), message)
+        val resolved = message.resolvePublicAttachmentLayout()
+        ProfileCache.mergePreviewFromPublicMessage(resolved)
+        upsertSingle(conversationIdForPublic(), resolved)
     }
 
     suspend fun markSendFailed(conversationId: String, clientMessageId: String) {
@@ -286,12 +301,48 @@ object MessageCacheStore {
     }
 
     suspend fun confirmPublicMessage(clientMessageId: String, confirmed: Message) {
-        ProfileCache.mergePreviewFromPublicMessage(confirmed)
-        confirmMessage(conversationIdForPublic(), clientMessageId, confirmed)
+        withContext(Dispatchers.Default) {
+            var resolved = confirmed.resolvePublicAttachmentLayout()
+            resolved = hydrateAttachmentPreviewFromDisk(resolved)
+            ProfileCache.mergePreviewFromPublicMessage(resolved)
+            confirmMessage(conversationIdForPublic(), clientMessageId, resolved)
+        }
     }
 
     suspend fun confirmDmMessage(otherUserId: Int, clientMessageId: String, confirmed: Message) {
         confirmMessage(conversationIdForDm(otherUserId), clientMessageId, confirmed)
+    }
+
+    /** After download/decrypt, persist [localPreviewUri] so reopen skips network. */
+    suspend fun patchPublicMessageLocalPreview(
+        messageId: Int,
+        localPreviewUri: String,
+    ) {
+        if (messageId <= 0 || !DecryptedImageCache.isDecryptedImageCacheUri(localPreviewUri)) return
+        val convId = conversationIdForPublic()
+        val iid = instanceId()
+        withContext(Dispatchers.Default) {
+            val row = db.messageDatabaseQueries
+                .selectMessageById(iid, convId, messageId.toLong())
+                .executeAsOneOrNull() ?: return@withContext
+            val msg = row.toAppMessage().copy(pendingFileUri = localPreviewUri)
+            if (msg.files.isNullOrEmpty() || msg.dmEnvelope != null) return@withContext
+            val laidOut = msg.resolvePublicAttachmentLayout()
+            db.messageDatabaseQueries.upsertMessage(
+                instanceId = iid,
+                id = laidOut.id.toLong(),
+                conversationId = convId,
+                userId = laidOut.user_id.toLong(),
+                content = encodePersistedPublicMessage(laidOut),
+                timestamp = laidOut.timestamp,
+                isRead = if (laidOut.is_read) 1L else 0L,
+                isEdited = if (laidOut.is_edited) 1L else 0L,
+                replyToId = resolveReplyToIdForPersistence(laidOut, row.replyToId),
+                clientMessageId = laidOut.client_message_id,
+                deletedFlag = 0L,
+                sendStatus = "sent",
+            )
+        }
     }
 
     /** After decrypt, persist [localPreviewUri] so reopen skips network. */
@@ -856,7 +907,12 @@ object MessageCacheStore {
 
     private suspend fun confirmMessage(conversationId: String, clientMessageId: String, confirmed: Message) {
         val iid = instanceId()
-        val storedContent = encodePersistedDmMessage(confirmed)
+        val storedContent = when {
+            !confirmed.files.isNullOrEmpty() && confirmed.dmEnvelope != null ->
+                encodePersistedDmMessage(confirmed)
+            !confirmed.files.isNullOrEmpty() -> encodePersistedPublicMessage(confirmed)
+            else -> confirmed.content
+        }
         withContext(Dispatchers.Default) {
             db.messageDatabaseQueries.transaction {
                 val existingReplyToId = db.messageDatabaseQueries
@@ -901,7 +957,10 @@ object MessageCacheStore {
                 validatedOrEmpty(
                     conversationId,
                     dedupeMessagesByClientId(
-                        enrichQueuedOutboundUi(withoutSuperseded, conversationId),
+                        enrichQueuedOutboundUi(
+                            hydrateAttachmentPreviewsFromDisk(withoutSuperseded),
+                            conversationId,
+                        ),
                     ),
                 ),
             )
@@ -915,6 +974,7 @@ object MessageCacheStore {
                 .selectRecentMessagesByConversation(iid, conversationId, limit)
                 .executeAsList()
             hydrateReplyReferencesFromRows(rows).reversed()
+                .let { hydrateAttachmentPreviewsFromDisk(it) }
         }
     }
 
@@ -951,7 +1011,9 @@ object MessageCacheStore {
                 it.conversationId == conversationId &&
                     (
                         it.kind == OutgoingMessageCoordinator.KIND_SEND_DM_ATTACHMENT ||
-                            it.kind == OutgoingMessageCoordinator.KIND_SEND_DM_ATTACHMENT_AWAITING_ACK
+                            it.kind == OutgoingMessageCoordinator.KIND_SEND_DM_ATTACHMENT_AWAITING_ACK ||
+                            it.kind == OutgoingMessageCoordinator.KIND_SEND_PUBLIC_ATTACHMENT ||
+                            it.kind == OutgoingMessageCoordinator.KIND_SEND_PUBLIC_ATTACHMENT_AWAITING_ACK
                         )
             }
         if (attachmentOutbox.isEmpty()) return messages
@@ -961,11 +1023,33 @@ object MessageCacheStore {
             .toSet()
         val payloads = attachmentOutbox.associate { row ->
             row.clientMessageId to runCatching {
-                Triple(
-                    outboxJson.decodeFromString<DmAttachmentOutboxPayload>(row.payloadJson),
-                    row.bytesUploaded,
-                    row.kind,
-                )
+                when (row.kind) {
+                    OutgoingMessageCoordinator.KIND_SEND_PUBLIC_ATTACHMENT,
+                    OutgoingMessageCoordinator.KIND_SEND_PUBLIC_ATTACHMENT_AWAITING_ACK -> {
+                        val payload = outboxJson.decodeFromString<PublicAttachmentOutboxPayload>(row.payloadJson)
+                        AttachmentOutboxUi(
+                            fileUri = payload.fileUri,
+                            filename = payload.filename,
+                            fileSizeBytes = payload.fileSizeBytes,
+                            aspectRatio = payload.aspectRatio,
+                            encryptedFileSizeBytes = 0L,
+                            bytesUploaded = row.bytesUploaded,
+                            kind = row.kind,
+                        )
+                    }
+                    else -> {
+                        val payload = outboxJson.decodeFromString<DmAttachmentOutboxPayload>(row.payloadJson)
+                        AttachmentOutboxUi(
+                            fileUri = payload.fileUri,
+                            filename = payload.filename,
+                            fileSizeBytes = payload.fileSizeBytes,
+                            aspectRatio = payload.aspectRatio,
+                            encryptedFileSizeBytes = payload.encryptedFileSizeBytes,
+                            bytesUploaded = row.bytesUploaded,
+                            kind = row.kind,
+                        )
+                    }
+                }
             }.getOrNull()
         }
         return messages.mapNotNull { msg ->
@@ -974,31 +1058,42 @@ object MessageCacheStore {
             if (cid.isNotEmpty() && cid in confirmedClientIds) return@mapNotNull null
             if (cid.isEmpty()) return@mapNotNull msg
             val entry = payloads[cid] ?: return@mapNotNull msg
-            val (payload, bytesUploaded, kind) = entry
-            val uploadFinished = kind == OutgoingMessageCoordinator.KIND_SEND_DM_ATTACHMENT_AWAITING_ACK
+            val uploadFinished =
+                entry.kind == OutgoingMessageCoordinator.KIND_SEND_DM_ATTACHMENT_AWAITING_ACK ||
+                    entry.kind == OutgoingMessageCoordinator.KIND_SEND_PUBLIC_ATTACHMENT_AWAITING_ACK
             val totalBytes = when {
-                payload.encryptedFileSizeBytes > 0L -> payload.encryptedFileSizeBytes
-                else -> payload.fileSizeBytes
+                entry.encryptedFileSizeBytes > 0L -> entry.encryptedFileSizeBytes
+                else -> entry.fileSizeBytes
             }
             val percent = when {
                 uploadFinished -> null
-                totalBytes > 0L && bytesUploaded > 0L ->
-                    ((bytesUploaded.toDouble() / totalBytes.toDouble()) * 100.0).toInt().coerceIn(0, 99)
-                bytesUploaded > 0L -> 1
+                totalBytes > 0L && entry.bytesUploaded > 0L ->
+                    ((entry.bytesUploaded.toDouble() / totalBytes.toDouble()) * 100.0).toInt().coerceIn(0, 99)
+                entry.bytesUploaded > 0L -> 1
                 else -> msg.uploadProgress ?: 0
             }
             msg.copy(
-                pendingFileUri = payload.fileUri,
-                pendingFilename = payload.filename,
-                pendingFileAspectRatio = payload.aspectRatio?.takeIf { it > 0f }
+                pendingFileUri = entry.fileUri,
+                pendingFilename = entry.filename,
+                pendingFileAspectRatio = entry.aspectRatio?.takeIf { it > 0f }
                     ?: msg.pendingFileAspectRatio,
                 uploadJobId = cid,
                 uploadProgress = percent,
                 fileSizes = msg.fileSizes
-                    ?: payload.fileSizeBytes.takeIf { it > 0L }?.let { listOf(it) },
+                    ?: entry.fileSizeBytes.takeIf { it > 0L }?.let { listOf(it) },
             )
         }
     }
+
+    private data class AttachmentOutboxUi(
+        val fileUri: String,
+        val filename: String,
+        val fileSizeBytes: Long,
+        val aspectRatio: Float?,
+        val encryptedFileSizeBytes: Long,
+        val bytesUploaded: Long,
+        val kind: String,
+    )
 
     private fun purgeSupersededPendingRows(
         instanceId: String,
@@ -1088,15 +1183,16 @@ object MessageCacheStore {
             reply_to = null,
             client_message_id = clientMessageId,
             reactions = null,
-            files = parsed.envelope?.files,
+            files = parsed.files ?: parsed.envelope?.files,
             dmEnvelope = parsed.envelope,
             fileThumbnails = parsed.fileThumbnails,
             fileAspectRatios = parsed.fileAspectRatios,
             fileSizes = parsed.fileSizes,
             fileDimensions = parsed.fileDimensions,
+            fileAspectRatioPairs = parsed.fileAspectRatioPairs,
             isContentCorrupted = parsed.isContentCorrupted,
         )
-        return base.copy(
+        val hydrated = base.copy(
             pendingFileUri = parsed.pendingFileUri
                 ?: parsed.localPreviewUri
                 ?: resolveLocalPreviewUri(base),
@@ -1109,11 +1205,36 @@ object MessageCacheStore {
                 },
             uploadError = if (sendStatus == "failed") SEND_ERROR_FAILED else null,
         )
+        return if (!hydrated.files.isNullOrEmpty() && hydrated.dmEnvelope == null) {
+            hydrated.resolvePublicAttachmentLayout()
+        } else {
+            hydrated
+        }
     }
+
+    private suspend fun ensureAttachmentDiskAlias(message: Message) {
+        val cid = message.client_message_id?.trim()?.takeIf { it.isNotEmpty() } ?: return
+        if (message.id <= 0) return
+        val file = message.files?.firstOrNull() ?: return
+        if (isImageFilename(file.name)) {
+            DecryptedImageCache.ensureDiskAliasForMessageId(message.id, 0, cid)
+        } else if (message.dmEnvelope != null) {
+            DecryptedFileCache.ensureDiskAliasForMessageId(message.id, 0, cid)
+        }
+    }
+
+    private suspend fun hydrateAttachmentPreviewFromDisk(message: Message): Message {
+        ensureAttachmentDiskAlias(message)
+        return hydrateAttachmentPreviewFromDiskSync(message)
+    }
+
+    private suspend fun hydrateAttachmentPreviewsFromDisk(messages: List<Message>): List<Message> =
+        messages.map { hydrateAttachmentPreviewFromDisk(it) }
 
     private fun storedMessageContent(msg: Message): String = when {
         msg.id < 0 -> encodeOptimisticOutboundMessage(msg)
         !msg.files.isNullOrEmpty() && msg.dmEnvelope != null -> encodePersistedDmMessage(msg)
+        !msg.files.isNullOrEmpty() -> encodePersistedPublicMessage(msg)
         else -> msg.content
     }
 

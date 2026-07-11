@@ -10,6 +10,7 @@ import ru.fromchat.api.local.db.store.MessageDatabaseProvider
 import ru.fromchat.api.local.download.AttachmentDownloadNotifier
 import ru.fromchat.api.local.send.DmAttachmentOutboxPayload
 import ru.fromchat.api.local.send.OutgoingMessageCoordinator
+import ru.fromchat.api.local.send.PublicAttachmentOutboxPayload
 import ru.fromchat.api.local.send.scheduleOutboxProcessing
 import ru.fromchat.api.local.cache.CacheContext
 import ru.fromchat.api.local.cache.repairInterruptedUploadArtifacts
@@ -53,9 +54,19 @@ object AttachmentTransferBootstrap {
             .selectPendingOutboxForInstance(instanceId)
             .executeAsList()
         for (row in rows) {
-            if (row.kind != OutgoingMessageCoordinator.KIND_SEND_DM_ATTACHMENT) continue
+            if (
+                row.kind != OutgoingMessageCoordinator.KIND_SEND_DM_ATTACHMENT &&
+                row.kind != OutgoingMessageCoordinator.KIND_SEND_PUBLIC_ATTACHMENT
+            ) {
+                continue
+            }
             val clientMessageId = runCatching {
-                json.decodeFromString<DmAttachmentOutboxPayload>(row.payloadJson).clientMessageId.trim()
+                when (row.kind) {
+                    OutgoingMessageCoordinator.KIND_SEND_DM_ATTACHMENT ->
+                        json.decodeFromString<DmAttachmentOutboxPayload>(row.payloadJson).clientMessageId.trim()
+                    else ->
+                        json.decodeFromString<PublicAttachmentOutboxPayload>(row.payloadJson).clientMessageId.trim()
+                }
             }.getOrNull().orEmpty()
             if (clientMessageId.isEmpty()) continue
             repairInterruptedUploadArtifacts(instanceId, clientMessageId)

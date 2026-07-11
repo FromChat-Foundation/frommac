@@ -3,9 +3,11 @@ package ru.fromchat.ui.chat.utils
 import ru.fromchat.api.ApiClient
 import ru.fromchat.api.local.cache.DecryptedImageCache
 import ru.fromchat.api.local.db.aspectRatioFromDimensionPair
+import ru.fromchat.api.local.db.isPlaceholderAttachmentDimensions
 import ru.fromchat.api.local.messages.sortMessagesForChatDisplay
 import ru.fromchat.api.schema.messages.Message
 import ru.fromchat.api.schema.messages.dm.DmEnvelope
+import ru.fromchat.api.schema.messages.publicchat.resolvePublicAttachmentLayout
 
 internal fun resolveDmReplyToId(
     envelope: DmEnvelope?,
@@ -80,37 +82,82 @@ internal fun mergeDatabaseMessagesWithPanelState(
 }
 
 internal fun mergeMessageUiFields(db: Message, panel: Message?): Message {
-    if (panel == null) return db
+    if (panel == null) {
+        return if (!db.files.isNullOrEmpty() && db.dmEnvelope == null) {
+            db.resolvePublicAttachmentLayout()
+        } else {
+            db
+        }
+    }
     val confirmed = db.id > 0
+    val dbHasRealLayout = db.fileAspectRatioPairs?.firstOrNull()?.let { pair ->
+        pair.size >= 2 && !isPlaceholderAttachmentDimensions(pair[0], pair[1])
+    } == true || db.fileDimensions?.firstOrNull()?.let { (w, h) ->
+        !isPlaceholderAttachmentDimensions(w, h)
+    } == true
+    // Keep any local preview across confirm so own image sends never flash network error UI.
     val localPreview = db.pendingFileUri?.takeIf { DecryptedImageCache.isDecryptedImageCacheUri(it) }
         ?: panel.pendingFileUri?.takeIf { DecryptedImageCache.isDecryptedImageCacheUri(it) }
-    return db.copy(
+        ?: panel.pendingFileUri?.takeIf { it.isNotBlank() }
+        ?: db.pendingFileUri?.takeIf { it.isNotBlank() }
+    val serverDim = db.fileDimensions?.firstOrNull()
+        ?: db.fileAspectRatioPairs?.firstOrNull()?.takeIf { it.size >= 2 }?.let { (w, h) -> w to h }
+        ?: panel.fileDimensions?.firstOrNull()
+        ?: panel.fileAspectRatioPairs?.firstOrNull()?.takeIf { it.size >= 2 }?.let { (w, h) -> w to h }
+    val serverRatio = db.fileAspectRatios?.firstOrNull() ?: panel.fileAspectRatios?.firstOrNull()
+    val localAspect = panel.pendingFileAspectRatio?.takeIf { it > 0f }
+        ?: db.pendingFileAspectRatio?.takeIf { it > 0f }
+        ?: panel.fileDimensions?.firstOrNull()?.let { (w, h) -> aspectRatioFromDimensionPair(w, h) }
+        ?: db.fileDimensions?.firstOrNull()?.let { (w, h) -> aspectRatioFromDimensionPair(w, h) }
+    val merged = db.copy(
         pendingFileUri = when {
-            confirmed -> localPreview ?: db.pendingFileUri
+            confirmed -> localPreview
             else -> panel.pendingFileUri ?: db.pendingFileUri
         },
         pendingFilename = if (confirmed) null else panel.pendingFilename ?: db.pendingFilename,
         uploadJobId = if (confirmed) null else panel.uploadJobId ?: db.uploadJobId,
-        pendingFileAspectRatio = if (confirmed) {
-            db.fileDimensions?.firstOrNull()?.let { (w, h) -> aspectRatioFromDimensionPair(w, h) }
-                ?: db.fileAspectRatios?.firstOrNull()
+        pendingFileAspectRatio = when {
+            confirmed && dbHasRealLayout -> null
+            confirmed -> localAspect
+                ?: serverDim?.let { (w, h) -> aspectRatioFromDimensionPair(w, h) }
+                ?: serverRatio
                 ?: db.pendingFileAspectRatio
-        } else {
-            panel.pendingFileAspectRatio ?: db.pendingFileAspectRatio
+            else -> panel.pendingFileAspectRatio ?: db.pendingFileAspectRatio
         },
         uploadProgress = if (confirmed) null else panel.uploadProgress ?: db.uploadProgress,
         uploadError = if (confirmed) null else panel.uploadError ?: db.uploadError,
         files = db.files ?: panel.files,
         dmEnvelope = db.dmEnvelope ?: panel.dmEnvelope,
         fileThumbnails = db.fileThumbnails ?: panel.fileThumbnails,
-        fileAspectRatios = db.fileAspectRatios ?: panel.fileAspectRatios,
+        fileAspectRatioPairs = db.fileAspectRatioPairs ?: panel.fileAspectRatioPairs,
+        fileAspectRatios = when {
+            confirmed && dbHasRealLayout -> db.fileAspectRatios ?: panel.fileAspectRatios
+            confirmed && localAspect != null -> listOf(localAspect)
+            else -> db.fileAspectRatios ?: panel.fileAspectRatios
+        },
         fileSizes = db.fileSizes ?: panel.fileSizes,
-        fileDimensions = db.fileDimensions ?: panel.fileDimensions,
+        fileDimensions = when {
+            confirmed && dbHasRealLayout -> db.fileDimensions ?: panel.fileDimensions
+            confirmed && panel.fileDimensions?.any { (w, h) ->
+                !isPlaceholderAttachmentDimensions(w, h)
+            } == true && !dbHasRealLayout -> panel.fileDimensions
+            confirmed && db.fileDimensions?.any { (w, h) ->
+                !isPlaceholderAttachmentDimensions(w, h)
+            } == true -> db.fileDimensions
+            else -> db.fileDimensions ?: panel.fileDimensions
+        },
         content = db.content.ifBlank { panel.content },
         isContentCorrupted = panel.isContentCorrupted || db.isContentCorrupted,
         replyToId = db.replyToId ?: panel.replyToId,
         reply_to = db.reply_to ?: panel.reply_to,
+        client_message_id = panel.client_message_id?.trim()?.takeIf { it.isNotEmpty() }
+            ?: db.client_message_id,
     )
+    return if (!merged.files.isNullOrEmpty() && merged.dmEnvelope == null) {
+        merged.resolvePublicAttachmentLayout()
+    } else {
+        merged
+    }
 }
 
 /** Keeps hydrated [Message.reply_to] when a network/DB refresh omits nested reply payloads. */

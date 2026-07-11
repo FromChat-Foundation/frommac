@@ -46,7 +46,17 @@ object DecryptedFileCache {
         fileIndex: Int,
         clientMessageId: String? = null,
     ): String? {
-        val key = storageKey(messageId, fileIndex, clientMessageId)
+        val cid = clientMessageId?.trim()?.takeIf { it.isNotEmpty() }
+        if (cid != null) {
+            val clientKey = storageKey(-1, fileIndex, cid)
+            memoryCache[clientKey]?.takeIf { uriFileExists(it) }?.let { return it }
+            readDisk(clientKey)?.let { return it }
+        }
+        val key = if (messageId > 0) {
+            storageKey(messageId, fileIndex, null)
+        } else {
+            storageKey(messageId, fileIndex, cid)
+        }
         memoryCache[key]?.takeIf { uriFileExists(it) }?.let { return it }
         return readDisk(key)
     }
@@ -116,7 +126,7 @@ object DecryptedFileCache {
         val idKey = storageKey(messageId, fileIndex, null)
         if (getCached(messageId, fileIndex, null) != null) return
         val cid = clientMessageId?.trim()?.takeIf { it.isNotEmpty() } ?: return
-        val cidKey = storageKey(messageId, fileIndex, cid)
+        val cidKey = storageKey(-1, fileIndex, cid)
         val sourceUri = cacheMutex.withLock { resolveUriLocked(cidKey) }
             ?: readDisk(cidKey)
             ?: return
@@ -221,6 +231,170 @@ object DecryptedFileCache {
                 }
             }.getOrNull()
         }
+    }
+
+    /**
+     * Downloads a plain (non-encrypted) public attachment into the file cache.
+     */
+    suspend fun getOrDownloadPlain(
+        messageId: Int,
+        fileIndex: Int,
+        file: DmFile,
+        clientMessageId: String? = null,
+        messageLabel: String? = null,
+    ): String? {
+        val key = storageKey(messageId, fileIndex, clientMessageId)
+        getCached(messageId, fileIndex, clientMessageId)?.let { return it }
+        cacheMutex.withLock { resolveUriLocked(key) }?.let { return it }
+
+        val label = AttachmentMediaLog.messageLabel(messageLabel)
+        AttachmentDownloadNotifier.beginDownload(
+            messageId = messageId,
+            fileIndex = fileIndex,
+            clientMessageId = clientMessageId,
+            mirrorAsFileAttachment = true,
+        )
+
+        return withContext(Dispatchers.Default) {
+            runCatching {
+                AttachmentDownloadScheduler.run(
+                    storageKey = key,
+                    messageId = messageId,
+                    keepAliveInBackground = true,
+                    work = {
+                        downloadPlainAndPersist(
+                            key = key,
+                            messageId = messageId,
+                            fileIndex = fileIndex,
+                            clientMessageId = clientMessageId,
+                            file = file,
+                            messageLabel = label,
+                        )
+                    },
+                )
+            }.onFailure { error ->
+                if (error !is CancellationException) {
+                    ApiClient.clearPartialEncryptedDownload(key)
+                }
+            }.getOrNull()
+        }
+    }
+
+    private suspend fun downloadPlainAndPersist(
+        key: String,
+        messageId: Int,
+        fileIndex: Int,
+        clientMessageId: String?,
+        file: DmFile,
+        messageLabel: String?,
+    ): String? {
+        ensureAttachmentDownloadActive(key)
+        cacheMutex.withLock { resolveUriLocked(key) }?.let { return it }
+
+        AttachmentDownloadNotifier.emit(
+            AttachmentDownloadProgress.InProgress(key, 1),
+            messageLabel = messageLabel,
+            messageId = messageId,
+            fileIndex = fileIndex,
+            clientMessageId = clientMessageId,
+            mirrorAsFileAttachment = true,
+        )
+
+        val outputPath = diskPath(key, file.name)
+        if (outputPath == null) {
+            AttachmentDownloadNotifier.emit(
+                AttachmentDownloadProgress.Failed(key, "cache_write_failed"),
+                messageLabel = messageLabel,
+                messageId = messageId,
+                fileIndex = fileIndex,
+                clientMessageId = clientMessageId,
+                mirrorAsFileAttachment = true,
+            )
+            return null
+        }
+
+        val downloaded = try {
+            ApiClient.fetchEncryptedFileResumable(
+                path = file.path,
+                resumeKey = key,
+                onProgress = { percent ->
+                    checkAttachmentDownloadActive(key)
+                    AttachmentDownloadNotifier.emit(
+                        AttachmentDownloadProgress.InProgress(key, percent.coerceIn(0, 100)),
+                        messageLabel = messageLabel,
+                        messageId = messageId,
+                        fileIndex = fileIndex,
+                        clientMessageId = clientMessageId,
+                        mirrorAsFileAttachment = true,
+                    )
+                },
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            if (PlatformFileSystem.exists(outputPath)) {
+                PlatformFileSystem.delete(outputPath)
+            }
+            ApiClient.clearPartialEncryptedDownload(key)
+            AttachmentDownloadNotifier.emit(
+                AttachmentDownloadProgress.Failed(key, error.message ?: "download_failed"),
+                messageLabel = messageLabel,
+                messageId = messageId,
+                fileIndex = fileIndex,
+                clientMessageId = clientMessageId,
+                mirrorAsFileAttachment = true,
+            )
+            return null
+        }
+
+        ensureAttachmentDownloadActive(key)
+        if (downloaded.path != outputPath) {
+            runCatching {
+                copyOutboundFileToPath("file://${downloaded.path}", outputPath)
+            }.onFailure {
+                ApiClient.clearPartialEncryptedDownload(key)
+                AttachmentDownloadNotifier.emit(
+                    AttachmentDownloadProgress.Failed(key, "cache_write_failed"),
+                    messageLabel = messageLabel,
+                    messageId = messageId,
+                    fileIndex = fileIndex,
+                    clientMessageId = clientMessageId,
+                    mirrorAsFileAttachment = true,
+                )
+                return null
+            }
+        }
+        ApiClient.clearPartialEncryptedDownload(key)
+        val uri = cacheMutex.withLock {
+            resolveUriLocked(key) ?: commitCachePathLocked(key, outputPath)
+        }
+        if (uri == null) {
+            AttachmentDownloadNotifier.emit(
+                AttachmentDownloadProgress.Failed(key, "cache_write_failed"),
+                messageLabel = messageLabel,
+                messageId = messageId,
+                fileIndex = fileIndex,
+                clientMessageId = clientMessageId,
+                mirrorAsFileAttachment = true,
+            )
+            return null
+        }
+        DownloadedFileRegistry.setExportUri(
+            messageId = messageId,
+            fileIndex = fileIndex,
+            clientMessageId = clientMessageId,
+            exportUri = uri,
+        )
+        AttachmentDownloadNotifier.emit(
+            AttachmentDownloadProgress.Success(storageKey = key, messageId = messageId),
+            messageLabel = messageLabel,
+            messageId = messageId,
+            fileIndex = fileIndex,
+            clientMessageId = clientMessageId,
+            mirrorAsFileAttachment = true,
+        )
+        PendingFileSaveRegistry.onCacheReady(key)
+        return uri
     }
 
     private suspend fun decryptAndPersist(

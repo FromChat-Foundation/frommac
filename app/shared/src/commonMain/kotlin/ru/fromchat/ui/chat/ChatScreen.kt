@@ -36,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -82,6 +83,7 @@ import ru.fromchat.Logger
 import ru.fromchat.Res
 import ru.fromchat.api.ApiClient
 import ru.fromchat.api.calls.CallStore
+import ru.fromchat.api.local.AttachmentMediaLog
 import ru.fromchat.api.local.WebSocketManager
 import ru.fromchat.api.local.db.store.ConnectionStateStore
 import ru.fromchat.api.local.db.store.ConnectionStatus
@@ -212,15 +214,44 @@ fun ChatScreen(
         mutableStateOf(setOf<String>())
     }
     // Visit-scoped (not saveable): reopen must re-seed history, never replay enter.
-    var lastAnimatedMessageKeys by remember(panelId) { mutableStateOf(setOf<String>()) }
-    var knownEnterIdentities by remember(panelId) { mutableStateOf(setOf<String>()) }
+    val openingMessages = remember(panelId) { panel.getState().messages }
+    val mountSnapshotKeys = remember(panelId) {
+        openingMessages.mapTo(mutableSetOf()) { messageListKey(it) }.toSet()
+    }
+    val mountSnapshotIdentities = remember(panelId) {
+        openingMessages.mapTo(mutableSetOf()) { messageEnterIdentity(it) }.toSet()
+    }
+    var lastAnimatedMessageKeys by remember(panelId) { mutableStateOf(mountSnapshotKeys) }
+    var knownEnterIdentities by remember(panelId) { mutableStateOf(mountSnapshotIdentities) }
+    var enterAnimationsSeeded by remember(panelId) {
+        mutableStateOf(mountSnapshotKeys.isNotEmpty())
+    }
+    // Blocks composition-only enter before the first LaunchedEffect seed on this visit.
+    var visitEnterSyncComplete by remember(panelId) {
+        mutableStateOf(mountSnapshotKeys.isNotEmpty())
+    }
     val enterCoordinator = remember(panelId) { MessageEnterCoordinator(scope) }
     val activeEnterAnimation by enterCoordinator.currentItem.collectAsState()
     val pendingNewMessageKeys by enterCoordinator.pendingNewMessageKeys.collectAsState()
     val queuedEnter by enterCoordinator.queuedEnter.collectAsState()
     var previousNewestFingerprint by remember(panelId) { mutableStateOf("") }
     var previousEnterMessageCount by remember(panelId) { mutableIntStateOf(0) }
-    var enterAnimationsSeeded by remember(panelId) { mutableStateOf(false) }
+
+    LaunchedEffect(panelId) {
+        val initial = panel.getState().messages
+        if (initial.isEmpty()) return@LaunchedEffect
+        val presentKeys = initial.mapTo(mutableSetOf()) { messageListKey(it) }
+        val presentIdentities = initial.mapTo(mutableSetOf()) { messageEnterIdentity(it) }
+        lastAnimatedMessageKeys = presentKeys
+        knownEnterIdentities = presentIdentities
+        enterAnimationsSeeded = true
+        visitEnterSyncComplete = true
+        previousEnterMessageCount = initial.size
+        val newest = initial.lastOrNull()
+        if (newest != null) {
+            previousNewestFingerprint = "${messageListKey(newest)}|${initial.size}"
+        }
+    }
 
     LaunchedEffect(panelState.messages) {
         val messages = panelState.messages
@@ -255,6 +286,7 @@ fun ChatScreen(
             previousNewestFingerprint = fingerprint
             previousEnterMessageCount = messages.size
             enterAnimationsSeeded = true
+            visitEnterSyncComplete = true
         }
 
         // First non-empty load for this visit: never animate existing history.
@@ -297,6 +329,10 @@ fun ChatScreen(
         // Exactly one new identity, but it isn't the newest row (insert/reorder).
         if (newestIdentity !in newIdentities) {
             seedWithoutAnimating("skip_new_not_newest")
+            return@LaunchedEffect
+        }
+        if (newestKey in mountSnapshotKeys || newestIdentity in mountSnapshotIdentities) {
+            seedWithoutAnimating("skip_opening_snapshot")
             return@LaunchedEffect
         }
         if (newestKey in lastAnimatedMessageKeys || newestIdentity in knownEnterIdentities) {
@@ -658,26 +694,47 @@ fun ChatScreen(
     }
 
     LaunchedEffect(panel) {
-        if (panel.getRecipientId() != null) {
+        if (panel.supportsAttachments) {
             AttachmentUploadNotifier.progressFlow.collect { progress ->
                 when (progress) {
-                    is AttachmentUploadProgress.Pending ->
+                    is AttachmentUploadProgress.Pending -> {
+                        AttachmentMediaLog.send(
+                            "ui_progress_pending",
+                            "job" to progress.jobId.take(12),
+                        )
                         panel.updateMessageByClientMessageId(progress.jobId) {
                             it.copy(uploadProgress = 0, uploadError = null)
                         }
+                    }
 
-                    is AttachmentUploadProgress.InProgress ->
+                    is AttachmentUploadProgress.InProgress -> {
+                        AttachmentMediaLog.send(
+                            "ui_progress_apply",
+                            "job" to progress.jobId.take(12),
+                            "pct" to progress.percent,
+                        )
                         panel.updateMessageByClientMessageId(progress.jobId) {
                             it.copy(uploadProgress = progress.percent, uploadError = null)
                         }
+                    }
 
-                    is AttachmentUploadProgress.Success ->
+                    is AttachmentUploadProgress.Success -> {
+                        AttachmentMediaLog.send(
+                            "ui_progress_success",
+                            "job" to progress.jobId.take(12),
+                        )
                         panel.updateMessageByClientMessageId(progress.jobId) {
                             it.copy(uploadProgress = null)
                         }
+                    }
 
                     is AttachmentUploadProgress.Failed -> {
                         if (progress.error == "Cancelled") return@collect
+                        AttachmentMediaLog.send(
+                            "ui_progress_failed",
+                            "job" to progress.jobId.take(12),
+                            "err" to progress.error,
+                        )
                         panel.updateMessageByClientMessageId(progress.jobId) {
                             it.copy(uploadProgress = null, uploadError = progress.error)
                         }
@@ -756,12 +813,21 @@ fun ChatScreen(
                                 scope.launch {
                                     val replyToId = replyTo?.id?.takeIf { it > 0 }
                                     val recipientId = panel.getRecipientId()
-                                    if (attachments.isNotEmpty() && recipientId != null) {
+                                    if (attachments.isNotEmpty() && panel.supportsAttachments) {
                                         val plaintext = text.ifBlank { "" }
                                         attachments.forEach { att ->
                                             val jobId = generateClientMessageId()
                                             val tempId = optimisticMessageIdForClientMessageId(jobId)
                                             val isImage = att.isImage
+                                            val sendT0 = AttachmentMediaLog.nowMs()
+                                            AttachmentMediaLog.send(
+                                                "tap_send",
+                                                "job" to jobId.take(12),
+                                                "image" to isImage,
+                                                "file" to att.filename,
+                                                "uri" to att.uri.take(64),
+                                                "public" to (recipientId == null),
+                                            )
                                             scope.launch(Dispatchers.Default) {
                                                 val imageDimensions = if (isImage) {
                                                     getImageDimensions(att.uri)
@@ -776,6 +842,13 @@ fun ChatScreen(
                                                     } else {
                                                         null
                                                     }
+                                                AttachmentMediaLog.send(
+                                                    "staging_start",
+                                                    "job" to jobId.take(12),
+                                                    "dims" to imageDimensions,
+                                                    "aspect" to aspectRatio,
+                                                    "elapsedMs" to (AttachmentMediaLog.nowMs() - sendT0),
+                                                )
                                                 val staged = if (isImage) {
                                                     prepareOutboundImageForSend(
                                                         clientMessageId = jobId,
@@ -792,9 +865,24 @@ fun ChatScreen(
                                                     )
                                                 }
                                                 if (staged == null) {
+                                                    AttachmentMediaLog.send(
+                                                        "staging_failed",
+                                                        "job" to jobId.take(12),
+                                                        "elapsedMs" to (AttachmentMediaLog.nowMs() - sendT0),
+                                                    )
                                                     return@launch
                                                 }
-                                                val fileUri = staged.stagedUri
+                                                AttachmentMediaLog.send(
+                                                    "staging_ok",
+                                                    "job" to jobId.take(12),
+                                                    "bytes" to staged.sizeBytes,
+                                                    "preview" to (staged.previewUri?.take(48) ?: "null"),
+                                                    "staged" to staged.stagedUri.take(48),
+                                                    "elapsedMs" to (AttachmentMediaLog.nowMs() - sendT0),
+                                                )
+                                                val uploadUri = staged.stagedUri
+                                                val previewUri = staged.previewUri?.takeIf { it.isNotBlank() }
+                                                    ?: staged.stagedUri
                                                 val optimisticMessage = Message(
                                                     id = tempId,
                                                     user_id = currentUserId ?: -1,
@@ -809,7 +897,7 @@ fun ChatScreen(
                                                     client_message_id = jobId,
                                                     reactions = null,
                                                     files = null,
-                                                    pendingFileUri = fileUri,
+                                                    pendingFileUri = previewUri,
                                                     pendingFilename = att.filename,
                                                     uploadJobId = jobId,
                                                     uploadProgress = 0,
@@ -819,6 +907,13 @@ fun ChatScreen(
                                                 )
                                                 withContext(Dispatchers.Main) {
                                                     panel.addMessage(optimisticMessage)
+                                                    AttachmentMediaLog.send(
+                                                        "optimistic_added",
+                                                        "job" to jobId.take(12),
+                                                        "tempId" to tempId,
+                                                        "pendingUri" to previewUri.take(48),
+                                                        "elapsedMs" to (AttachmentMediaLog.nowMs() - sendT0),
+                                                    )
                                                 }
                                                 AttachmentUploadNotifier.emit(
                                                     AttachmentUploadProgress.InProgress(
@@ -828,16 +923,45 @@ fun ChatScreen(
                                                     ),
                                                     messageLabel = plaintext,
                                                 )
-                                                OutgoingMessageCoordinator.enqueueDmAttachment(
-                                                    recipientId = recipientId,
-                                                    plaintext = plaintext,
-                                                    clientMessageId = jobId,
-                                                    replyToId = replyToId,
-                                                    fileUri = fileUri,
-                                                    filename = att.filename,
-                                                    optimisticMessage = optimisticMessage,
-                                                    aspectRatio = staged.aspectRatio ?: aspectRatio,
-                                                    fileSizeBytes = staged.sizeBytes,
+                                                if (recipientId != null) {
+                                                    AttachmentMediaLog.send(
+                                                        "enqueue_dm",
+                                                        "job" to jobId.take(12),
+                                                        "peer" to recipientId,
+                                                        "elapsedMs" to (AttachmentMediaLog.nowMs() - sendT0),
+                                                    )
+                                                    OutgoingMessageCoordinator.enqueueDmAttachment(
+                                                        recipientId = recipientId,
+                                                        plaintext = plaintext,
+                                                        clientMessageId = jobId,
+                                                        replyToId = replyToId,
+                                                        fileUri = uploadUri,
+                                                        filename = att.filename,
+                                                        optimisticMessage = optimisticMessage,
+                                                        aspectRatio = staged.aspectRatio ?: aspectRatio,
+                                                        fileSizeBytes = staged.sizeBytes,
+                                                    )
+                                                } else {
+                                                    AttachmentMediaLog.send(
+                                                        "enqueue_public",
+                                                        "job" to jobId.take(12),
+                                                        "elapsedMs" to (AttachmentMediaLog.nowMs() - sendT0),
+                                                    )
+                                                    OutgoingMessageCoordinator.enqueuePublicAttachment(
+                                                        content = plaintext,
+                                                        clientMessageId = jobId,
+                                                        replyToId = replyToId,
+                                                        fileUri = uploadUri,
+                                                        filename = att.filename,
+                                                        optimisticMessage = optimisticMessage,
+                                                        aspectRatio = staged.aspectRatio ?: aspectRatio,
+                                                        fileSizeBytes = staged.sizeBytes,
+                                                    )
+                                                }
+                                                AttachmentMediaLog.send(
+                                                    "enqueue_done",
+                                                    "job" to jobId.take(12),
+                                                    "elapsedMs" to (AttachmentMediaLog.nowMs() - sendT0),
                                                 )
                                             }
                                         }
@@ -859,7 +983,7 @@ fun ChatScreen(
                             inputText = ""
                         },
                         hazeState = hazeState,
-                        recipientId = panel.getRecipientId(),
+                        supportsAttachments = panel.supportsAttachments,
                         isReadOnly = isReadOnly,
                         onReadOnlyMessageClick = {
                             if (isReadOnly) {
@@ -948,10 +1072,16 @@ fun ChatScreen(
                                     // Keep the newest bubble as NewMessage before enqueue runs.
                                     val newest = panelState.messages.lastOrNull()
                                     val newestListKey = newest?.let { messageListKey(it) }
+                                    val newestEnterIdentity = newest?.let { messageEnterIdentity(it) }
                                     val compositionPendingNewest =
-                                        enterAnimationsSeeded &&
+                                        visitEnterSyncComplete &&
+                                            enterAnimationsSeeded &&
                                             newestListKey != null &&
+                                            newestEnterIdentity != null &&
+                                            newestListKey !in mountSnapshotKeys &&
+                                            newestEnterIdentity !in mountSnapshotIdentities &&
                                             newestListKey !in lastAnimatedMessageKeys &&
+                                            newestEnterIdentity !in knownEnterIdentities &&
                                             newestListKey !in pendingNewMessageKeys &&
                                             activeEnterAnimation?.newMessageKey != newestListKey
                                     val pendingKeysForRole =
@@ -1041,7 +1171,16 @@ fun ChatScreen(
                                             }
                                             }
                                         },
-                                        enterAnimationRole = enterRole,
+                                        enterAnimationRole = if (!visitEnterSyncComplete) {
+                                            EnterAnimationRole.None
+                                        } else {
+                                            enterRole
+                                        },
+                                        isExiting = messageDissolveKey(message) in
+                                            panelState.dissolvingMessageKeys,
+                                        onExitAnimationFinished = {
+                                            panel.finishDissolveAnimation(messageDissolveKey(message))
+                                        },
                                         modifier = Modifier.padding(top = item.spacingAbove),
                                         isContextMenuOpen = contextMenuState.isOpen,
                                         isContextMenuForThisMessage =

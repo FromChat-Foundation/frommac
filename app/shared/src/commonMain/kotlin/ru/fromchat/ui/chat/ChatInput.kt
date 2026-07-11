@@ -239,7 +239,7 @@ fun ChatInput(
     onClearReply: () -> Unit,
     onClearEdit: () -> Unit,
     hazeState: HazeState,
-    recipientId: Int? = null,
+    supportsAttachments: Boolean = false,
     currentUserId: Int? = null,
     isReadOnly: Boolean = false,
     onReadOnlyMessageClick: () -> Unit = {},
@@ -477,7 +477,7 @@ fun ChatInput(
                                 },
                             )
 
-                            if (recipientId != null) {
+                            if (supportsAttachments) {
                                 Box(
                                     modifier = Modifier
                                         .padding(vertical = ChatInputIconSlotVerticalInset)

@@ -10,6 +10,8 @@ import ru.fromchat.api.local.download.LocalDecodedImageCache
 
 data class StagedOutboundPreview(
     val stagedUri: String,
+    /** Decrypted-image cache URI for UI preview (preferred over [stagedUri]). */
+    val previewUri: String? = null,
     val aspectRatio: Float?,
     val sizeBytes: Long = 0L,
 )
@@ -30,7 +32,7 @@ suspend fun prepareOutboundImageForSend(
     }.getOrNull() ?: return@withContext null
     if (staged.sizeBytes <= 0L) return@withContext null
 
-    DecryptedImageCache.seedFromLocalFile(
+    val previewUri = DecryptedImageCache.seedFromLocalFile(
         messageId = optimisticMessageId,
         fileIndex = 0,
         localFileUri = staged.uri,
@@ -39,9 +41,18 @@ suspend fun prepareOutboundImageForSend(
 
     val storageKey = DecryptedImageCache.storageKey(optimisticMessageId, 0, clientMessageId)
     val decodeTarget = previewSeedDecodeSize(aspectRatio)
-    LocalDecodedImageCache.loadFull(storageKey, staged.uri, decodeTarget)
+    LocalDecodedImageCache.loadFull(
+        storageKey,
+        (previewUri ?: staged.uri).removePrefix("file://"),
+        decodeTarget,
+    )
 
-    StagedOutboundPreview(stagedUri = staged.uri, aspectRatio = aspectRatio, sizeBytes = staged.sizeBytes)
+    StagedOutboundPreview(
+        stagedUri = staged.uri,
+        previewUri = previewUri,
+        aspectRatio = aspectRatio,
+        sizeBytes = staged.sizeBytes,
+    )
 }
 
 /** High-quality seed decode before the tile is measured (refined when laid out). */

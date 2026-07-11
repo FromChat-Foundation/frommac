@@ -38,13 +38,18 @@ data class Message(
     @Transient val uploadError: String? = null,
     /** For DM file decryption; not serialized over network. */
     @Transient val dmEnvelope: DmEnvelope? = null,
-    /** Blurhashes for image files (by index); from decrypted message JSON. */
-    @Transient val fileThumbnails: List<String>? = null,
-    /** Aspect ratios (width/height) for image files (by index); from decrypted message JSON. */
+    /** Base64 JPEG thumbnails for image files (by index); public API or decrypted DM JSON. */
+    @SerialName("fileThumbnails") val fileThumbnails: List<String>? = null,
+    /**
+     * Pixel [width, height] pairs from public API / DM plaintext.
+     * Prefer [fileDimensions] / [fileAspectRatios] for layout after [resolvePublicAttachmentLayout].
+     */
+    @SerialName("fileAspectRatios") val fileAspectRatioPairs: List<List<Int>>? = null,
+    /** File sizes in bytes (by index). */
+    @SerialName("fileSizes") val fileSizes: List<Long>? = null,
+    /** Aspect ratios (width/height) for image files (by index); derived client-side. */
     @Transient val fileAspectRatios: List<Float>? = null,
-    /** File sizes in bytes (by index); from decrypted message JSON. */
-    @Transient val fileSizes: List<Long>? = null,
-    /** Image dimensions (width, height) for image files (by index); from decrypted message JSON. */
+    /** Image dimensions (width, height) for image files (by index). */
     @Transient val fileDimensions: List<Pair<Int, Int>>? = null,
     /** True when DM plaintext could not be decrypted and [content] shows the corrupted placeholder. */
     @Transient val isContentCorrupted: Boolean = false,

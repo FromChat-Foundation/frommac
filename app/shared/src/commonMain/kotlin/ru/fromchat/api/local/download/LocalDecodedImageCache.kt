@@ -121,6 +121,10 @@ object LocalDecodedImageCache {
         return bitmap
     }
 
+    fun putThumb(storageKey: String, bitmap: ImageBitmap) {
+        PlatformDecodedBitmapCache.put(storageKey + THUMB_SUFFIX, bitmap)
+    }
+
     fun evict(storageKey: String) {
         PlatformDecodedBitmapCache.remove(previewCacheKey(storageKey))
         PlatformDecodedBitmapCache.remove(fullscreenCacheKey(storageKey))

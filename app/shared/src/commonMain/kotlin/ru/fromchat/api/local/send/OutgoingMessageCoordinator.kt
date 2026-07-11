@@ -255,6 +255,53 @@ object OutgoingMessageCoordinator {
         kickOutboxDrain(instanceId)
     }
 
+    suspend fun enqueuePublicAttachment(
+        content: String,
+        clientMessageId: String,
+        replyToId: Int?,
+        fileUri: String,
+        filename: String,
+        optimisticMessage: Message,
+        aspectRatio: Float? = null,
+        fileSizeBytes: Long = 0L,
+    ) {
+        val instanceId = CacheContext.requireActiveInstanceId()
+        val conversationId = conversationIdForGroup(GENERAL_PUBLIC_GROUP_ID)
+        AttachmentUploadNotifier.emit(
+            AttachmentUploadProgress.Pending(clientMessageId, filename),
+            messageLabel = content,
+        )
+        AttachmentUploadNotifier.emit(
+            AttachmentUploadProgress.InProgress(clientMessageId, 1, filename),
+            messageLabel = content,
+        )
+        withContext(Dispatchers.Default) {
+            MessageRepository.upsertPublicMessage(optimisticMessage)
+            val payload = json.encodeToString(
+                PublicAttachmentOutboxPayload(
+                    content = content,
+                    clientMessageId = clientMessageId,
+                    replyToId = replyToId,
+                    fileUri = fileUri,
+                    filename = filename,
+                    fileSizeBytes = fileSizeBytes.coerceAtLeast(0L),
+                    aspectRatio = aspectRatio?.takeIf { it > 0f },
+                ),
+            )
+            MessageDatabaseProvider.database.messageDatabaseQueries.upsertOutbox(
+                instanceId = instanceId,
+                clientMessageId = clientMessageId,
+                conversationId = conversationId,
+                kind = KIND_SEND_PUBLIC_ATTACHMENT,
+                payloadJson = payload,
+                retryCount = 0L,
+                nextAttemptAt = null,
+                bytesUploaded = 0L,
+            )
+        }
+        kickOutboxDrain(instanceId)
+    }
+
     suspend fun clearAttachmentOutboxAfterAck(clientMessageId: String) {
         val cid = clientMessageId.trim()
         if (cid.isEmpty()) return
@@ -275,6 +322,22 @@ object OutgoingMessageCoordinator {
             .onFailure { error ->
                 AttachmentMediaLog.upload(
                     "server_abort_failed",
+                    "uploadId" to id,
+                    "error" to (error.message ?: "unknown"),
+                )
+            }
+    }
+
+    suspend fun abortPublicServerUploadIfNeeded(uploadId: String) {
+        val id = uploadId.trim()
+        if (id.isEmpty()) return
+        runCatching { ApiClient.abortPublicUpload(id) }
+            .onSuccess {
+                AttachmentMediaLog.upload("public_server_abort_ok", "uploadId" to id)
+            }
+            .onFailure { error ->
+                AttachmentMediaLog.upload(
+                    "public_server_abort_failed",
                     "uploadId" to id,
                     "error" to (error.message ?: "unknown"),
                 )
@@ -316,10 +379,14 @@ object OutgoingMessageCoordinator {
             val row = MessageDatabaseProvider.database.messageDatabaseQueries
                 .selectOutboxItem(instanceId, cid)
                 .executeAsOneOrNull()
-            if (row?.kind == KIND_SEND_DM_ATTACHMENT) {
-                runCatching {
+            when (row?.kind) {
+                KIND_SEND_DM_ATTACHMENT -> runCatching {
                     val payload = json.decodeFromString<DmAttachmentOutboxPayload>(row.payloadJson)
                     abortDmServerUploadIfNeeded(payload.uploadId)
+                }
+                KIND_SEND_PUBLIC_ATTACHMENT -> runCatching {
+                    val payload = json.decodeFromString<PublicAttachmentOutboxPayload>(row.payloadJson)
+                    abortPublicServerUploadIfNeeded(payload.uploadId)
                 }
             }
             MessageDatabaseProvider.database.messageDatabaseQueries.deleteOutboxItem(instanceId, cid)
@@ -366,7 +433,14 @@ object OutgoingMessageCoordinator {
                             scheduleOutboxRetry(id)
                         }
                     }
-                    KIND_SEND_DM_ATTACHMENT_AWAITING_ACK -> Unit
+                    KIND_SEND_PUBLIC_ATTACHMENT -> {
+                        if (!PublicAttachmentOutboxHandler.process(row)) {
+                            allOk = false
+                            scheduleOutboxRetry(id)
+                        }
+                    }
+                    KIND_SEND_DM_ATTACHMENT_AWAITING_ACK,
+                    KIND_SEND_PUBLIC_ATTACHMENT_AWAITING_ACK -> Unit
                 }
             }
             allOk
@@ -378,6 +452,9 @@ object OutgoingMessageCoordinator {
     const val KIND_SEND_DM_ATTACHMENT = "send_dm_attachment"
     /** Upload+send finished; row kept until DM ack so UI can still resolve local preview from outbox. */
     const val KIND_SEND_DM_ATTACHMENT_AWAITING_ACK = "send_dm_attachment_awaiting_ack"
+    const val KIND_SEND_PUBLIC_ATTACHMENT = "send_public_attachment"
+    /** Upload+send finished; row kept briefly so UI can still resolve local preview from outbox. */
+    const val KIND_SEND_PUBLIC_ATTACHMENT_AWAITING_ACK = "send_public_attachment_awaiting_ack"
 
     suspend fun pruneStaleAttachmentOutboxForInstance(instanceId: String) {
         val id = instanceId.trim()
@@ -392,7 +469,9 @@ object OutgoingMessageCoordinator {
             for (row in rows) {
                 when (row.kind) {
                     KIND_SEND_DM_ATTACHMENT,
-                    KIND_SEND_DM_ATTACHMENT_AWAITING_ACK -> {
+                    KIND_SEND_DM_ATTACHMENT_AWAITING_ACK,
+                    KIND_SEND_PUBLIC_ATTACHMENT,
+                    KIND_SEND_PUBLIC_ATTACHMENT_AWAITING_ACK -> {
                         if (!MessageCacheStore.hasSentMessageWithClientId(
                                 row.conversationId,
                                 row.clientMessageId,

@@ -10,9 +10,12 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import ru.fromchat.api.schema.messages.Message
+import ru.fromchat.api.schema.messages.publicchat.resolvePublicAttachmentLayout
 import ru.fromchat.api.schema.messages.dm.DmEnvelope
+import ru.fromchat.api.schema.messages.dm.DmFile
 import ru.fromchat.api.local.AttachmentMediaLog
 import ru.fromchat.api.local.cache.DecryptedImageCache
+import ru.fromchat.api.local.download.readLocalImageDimensions
 
 private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -50,15 +53,30 @@ private data class PersistedDmMessagePayload(
     @SerialName("localPreviewUri") val localPreviewUri: String? = null,
 )
 
+@Serializable
+private data class PersistedPublicMessagePayload(
+    @SerialName("text") val text: String,
+    @SerialName("files") val files: List<DmFile>,
+    @SerialName("fileThumbnails") val fileThumbnails: List<String>? = null,
+    @SerialName("fileAspectRatios") val fileAspectRatios: List<Float>? = null,
+    @SerialName("fileSizes") val fileSizes: List<Long>? = null,
+    @SerialName("fileDimensions") val fileDimensions: List<List<Int>>? = null,
+    /** Canonical API [width, height] pairs — survives reopen without network. */
+    @SerialName("fileAspectRatioPairs") val fileAspectRatioPairs: List<List<Int>>? = null,
+    @SerialName("localPreviewUri") val localPreviewUri: String? = null,
+)
+
 data class ParsedDmMessageContent(
     val text: String,
     /** Reply target from encrypted JSON payload (`reply_to_id`), when present. */
     val replyToId: Int? = null,
     val envelope: DmEnvelope? = null,
+    val files: List<DmFile>? = null,
     val fileThumbnails: List<String>? = null,
     val fileAspectRatios: List<Float>? = null,
     val fileSizes: List<Long>? = null,
     val fileDimensions: List<Pair<Int, Int>>? = null,
+    val fileAspectRatioPairs: List<List<Int>>? = null,
     val isContentCorrupted: Boolean = false,
     val localPreviewUri: String? = null,
     val pendingFileUri: String? = null,
@@ -114,6 +132,65 @@ fun resolveLocalPreviewUri(message: Message): String? {
     return null
 }
 
+/** Sync disk lookup for cold-start chat open (no suspend alias copy). */
+fun hydrateAttachmentPreviewFromDiskSync(message: Message): Message {
+    val previewUri = resolveLocalPreviewUri(message) ?: return hydrateDiskAspectRatioSync(message)
+    val withPreview = if (message.pendingFileUri == previewUri) {
+        message
+    } else {
+        message.copy(pendingFileUri = previewUri)
+    }
+    return hydrateDiskAspectRatioSync(withPreview)
+}
+
+private fun hydrateDiskAspectRatioSync(message: Message): Message {
+    val file = message.files?.firstOrNull() ?: return message
+    if (!isImageAttachmentFilename(file.name)) return message
+    if (messageHasLayoutAspect(message)) return message
+    val aspect = readDiskAspectRatioForMessage(message) ?: return message
+    return message.copy(pendingFileAspectRatio = aspect)
+}
+
+private fun isImageAttachmentFilename(name: String): Boolean =
+    name.endsWith(".png", true) || name.endsWith(".jpg", true) ||
+        name.endsWith(".jpeg", true) || name.endsWith(".gif", true) || name.endsWith(".webp", true)
+
+private fun messageHasLayoutAspect(message: Message): Boolean {
+    message.fileAspectRatioPairs?.firstOrNull()?.takeIf { it.size >= 2 }?.let { pair ->
+        val w = pair[0]
+        val h = pair[1]
+        if (w > 0 && h > 0 && !isPlaceholderAttachmentDimensions(w, h)) return true
+    }
+    message.fileDimensions?.firstOrNull()?.let { (w, h) ->
+        if (w > 0 && h > 0 && !isPlaceholderAttachmentDimensions(w, h)) return true
+    }
+    message.fileAspectRatios?.firstOrNull()?.takeIf { !isPlaceholderAttachmentAspectRatio(it) }?.let {
+        return true
+    }
+    message.pendingFileAspectRatio?.takeIf { it > 0f && !isPlaceholderAttachmentAspectRatio(it) }?.let {
+        return true
+    }
+    return false
+}
+
+private fun readDiskAspectRatioForMessage(message: Message): Float? {
+    val paths = buildList {
+        DecryptedImageCache.getCachedThumbUri(message.id, 0, message.client_message_id)
+            ?.removePrefix("file://")
+            ?.takeIf { it.isNotEmpty() }
+            ?.let(::add)
+        message.pendingFileUri?.removePrefix("file://")?.takeIf { it.isNotEmpty() }?.let(::add)
+        resolveLocalPreviewUri(message)?.removePrefix("file://")?.takeIf { it.isNotEmpty() }?.let(::add)
+    }.distinct()
+    for (path in paths) {
+        if (!localPreviewFileExists("file://$path")) continue
+        val (w, h) = readLocalImageDimensions(path) ?: continue
+        if (w <= 0 || h <= 0 || isPlaceholderAttachmentDimensions(w, h)) continue
+        return aspectRatioFromDimensionPair(w, h)
+    }
+    return null
+}
+
 /**
  * Layout width/height. Pixel pairs keep [w,h] order (landscape vs portrait).
  * Do not min/max swap — that forces every landscape 4K image into portrait.
@@ -127,6 +204,12 @@ internal fun aspectRatioFromDimensionPair(w: Int, h: Int): Float {
     val (dw, dh) = attachmentDimensionsForLayout(w, h)
     return dw.toFloat() / dh.toFloat()
 }
+
+/** Server fallback when thumb meta is missing (e.g. very large images). */
+internal fun isPlaceholderAttachmentDimensions(w: Int, h: Int): Boolean = w == 1 && h == 1
+
+internal fun isPlaceholderAttachmentAspectRatio(ratio: Float): Boolean =
+    ratio in 0.999f..1.001f
 
 private fun localPreviewFileExists(uri: String): Boolean {
     val path = uri.removePrefix("file://")
@@ -154,6 +237,33 @@ fun encodePersistedDmMessage(message: Message): String {
         "clientId" to message.client_message_id,
         "localPreview" to (payload.localPreviewUri?.take(64) ?: "null"),
         "dims" to (dims?.firstOrNull()?.joinToString("x") ?: "null"),
+    )
+    return json.encodeToString(payload)
+}
+
+fun encodePersistedPublicMessage(message: Message): String {
+    val laidOut = message.resolvePublicAttachmentLayout()
+    val files = laidOut.files?.takeIf { it.isNotEmpty() } ?: return laidOut.content
+    val dims = laidOut.fileDimensions?.map { listOf(it.first, it.second) }
+    val pairs = laidOut.fileAspectRatioPairs
+    val payload = PersistedPublicMessagePayload(
+        text = laidOut.content,
+        files = files,
+        fileThumbnails = laidOut.fileThumbnails,
+        fileAspectRatios = laidOut.fileAspectRatios,
+        fileSizes = laidOut.fileSizes,
+        fileDimensions = dims,
+        fileAspectRatioPairs = pairs,
+        localPreviewUri = resolveLocalPreviewUri(laidOut),
+    )
+    AttachmentMediaLog.persist(
+        "encode_public",
+        "msgId" to laidOut.id,
+        "clientId" to laidOut.client_message_id,
+        "files" to files.size,
+        "localPreview" to (payload.localPreviewUri?.take(64) ?: "null"),
+        "dims" to (dims?.firstOrNull()?.joinToString("x") ?: "null"),
+        "pairs" to (pairs?.firstOrNull()),
     )
     return json.encodeToString(payload)
 }
@@ -194,6 +304,7 @@ fun parseDmMessageContent(plaintext: String): ParsedDmMessageContent {
                 ParsedDmMessageContent(
                     text = payload.text,
                     envelope = payload.envelope,
+                    files = payload.envelope.files,
                     fileThumbnails = payload.fileThumbnails,
                     fileAspectRatios = payload.fileAspectRatios,
                     fileSizes = payload.fileSizes,
@@ -201,6 +312,26 @@ fun parseDmMessageContent(plaintext: String): ParsedDmMessageContent {
                         if (pair.size >= 2) pair[0] to pair[1] else null
                     },
                     isContentCorrupted = payload.isContentCorrupted,
+                    localPreviewUri = payload.localPreviewUri?.takeIf { localPreviewFileExists(it) },
+                )
+            }.getOrElse {
+                ParsedDmMessageContent(text = plaintext)
+            }
+        }
+        val isPersistedPublic = root?.containsKey("files") == true
+        if (isPersistedPublic) {
+            return runCatching {
+                val payload = json.decodeFromString<PersistedPublicMessagePayload>(trimmed)
+                ParsedDmMessageContent(
+                    text = payload.text,
+                    files = payload.files,
+                    fileThumbnails = payload.fileThumbnails,
+                    fileAspectRatios = payload.fileAspectRatios,
+                    fileSizes = payload.fileSizes,
+                    fileDimensions = payload.fileDimensions?.mapNotNull { pair ->
+                        if (pair.size >= 2) pair[0] to pair[1] else null
+                    },
+                    fileAspectRatioPairs = payload.fileAspectRatioPairs,
                     localPreviewUri = payload.localPreviewUri?.takeIf { localPreviewFileExists(it) },
                 )
             }.getOrElse {

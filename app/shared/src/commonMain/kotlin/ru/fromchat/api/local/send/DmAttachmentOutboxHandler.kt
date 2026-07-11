@@ -557,6 +557,9 @@ object DmAttachmentOutboxHandler {
             MessageDatabaseProvider.database.messageDatabaseQueries
                 .selectPendingOutboxForInstance(instanceId)
                 .executeAsList()
-                .any { it.kind == OutgoingMessageCoordinator.KIND_SEND_DM_ATTACHMENT }
+                .any {
+                    it.kind == OutgoingMessageCoordinator.KIND_SEND_DM_ATTACHMENT ||
+                        it.kind == OutgoingMessageCoordinator.KIND_SEND_PUBLIC_ATTACHMENT
+                }
         }
 }

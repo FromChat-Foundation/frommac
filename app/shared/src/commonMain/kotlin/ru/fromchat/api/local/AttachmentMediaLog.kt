@@ -22,6 +22,12 @@ object AttachmentMediaLog {
 
     fun persist(message: String, vararg fields: Pair<String, Any?>) = log("PERSIST", message, fields)
 
+    /** Image tile layout aspect ratio (upload → confirm). Filter: `adb logcat -s AttachmentMedia`. */
+    fun aspect(message: String, vararg fields: Pair<String, Any?>) = log("ASPECT", message, fields)
+
+    /** End-to-end outbound send timeline (tap → confirmed). Filter logcat: `AttachmentMedia`. */
+    fun send(message: String, vararg fields: Pair<String, Any?>) = log("SEND", message, fields)
+
     fun nowMs(): Long = Clock.System.now().toEpochMilliseconds()
 
     /** Short message text for download/upload log lines (not for UI). */

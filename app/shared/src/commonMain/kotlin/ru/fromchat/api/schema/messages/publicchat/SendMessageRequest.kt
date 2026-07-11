@@ -7,4 +7,5 @@ data class SendMessageRequest(
     val content: String,
     val reply_to_id: Int? = null,
     val client_message_id: String? = null,
+    val uploaded_file_ids: List<String>? = null,
 )

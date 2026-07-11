@@ -37,5 +37,10 @@ suspend fun prepareOutboundFileForSend(
         exportUri = cacheUri,
     )
 
-    StagedOutboundPreview(stagedUri = staged.uri, aspectRatio = null, sizeBytes = staged.sizeBytes)
+    StagedOutboundPreview(
+        stagedUri = staged.uri,
+        previewUri = cacheUri,
+        aspectRatio = null,
+        sizeBytes = staged.sizeBytes,
+    )
 }

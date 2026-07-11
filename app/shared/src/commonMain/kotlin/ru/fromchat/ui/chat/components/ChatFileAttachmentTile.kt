@@ -120,6 +120,10 @@ fun ChatFileAttachmentTile(
     val displayUploadProgress = if (isUploading) uploadProgress ?: 0 else uploadProgress
     val openableLocalUri = resolvedCacheUri
         ?: pendingFileUri?.takeIf { isPendingLocal }
+    val canPlainDownload = file != null && dmEnvelope == null &&
+        (file.path.contains("/normal/") || (file.nonceB64.isNullOrBlank() && file.wrappedMekB64.isNullOrBlank()))
+    val canEncryptedDownload = file != null && dmEnvelope != null
+    val canDownload = canPlainDownload || canEncryptedDownload
 
     val onRowClick: (() -> Unit)? = when {
         openableLocalUri != null -> {
@@ -132,7 +136,7 @@ fun ChatFileAttachmentTile(
                 }
             }
         }
-        downloadPaused && file != null && dmEnvelope != null -> {
+        downloadPaused && canDownload -> file?.let { downloadFile ->
             {
                 AttachmentDownloadNotifier.beginDownload(
                     messageId = messageId,
@@ -141,11 +145,11 @@ fun ChatFileAttachmentTile(
                     mirrorAsFileAttachment = true,
                 )
                 scope.launch {
-                    val ok = DmFileDownloader.downloadToCache(
+                    val ok = downloadAttachmentToCache(
                         messageId = messageId,
                         fileIndex = fileIndex,
-                        file = file,
-                        envelope = dmEnvelope,
+                        file = downloadFile,
+                        dmEnvelope = dmEnvelope,
                         currentUserId = currentUserId,
                         clientMessageId = clientMessageId,
                         messageLabel = messageLabel,
@@ -162,7 +166,7 @@ fun ChatFileAttachmentTile(
                 }
             }
         }
-        file != null && dmEnvelope != null && !isDownloading && !downloadPaused -> {
+        canDownload && !isDownloading && !downloadPaused -> file?.let { downloadFile ->
             {
                 AttachmentDownloadNotifier.beginDownload(
                     messageId = messageId,
@@ -171,11 +175,11 @@ fun ChatFileAttachmentTile(
                     mirrorAsFileAttachment = true,
                 )
                 scope.launch {
-                    val ok = DmFileDownloader.downloadToCache(
+                    val ok = downloadAttachmentToCache(
                         messageId = messageId,
                         fileIndex = fileIndex,
-                        file = file,
-                        envelope = dmEnvelope,
+                        file = downloadFile,
+                        dmEnvelope = dmEnvelope,
                         currentUserId = currentUserId,
                         clientMessageId = clientMessageId,
                         messageLabel = messageLabel,
@@ -273,3 +277,33 @@ fun ChatFileAttachmentTile(
         }
     }
 }
+
+private suspend fun downloadAttachmentToCache(
+    messageId: Int,
+    fileIndex: Int,
+    file: DmFile,
+    dmEnvelope: DmEnvelope?,
+    currentUserId: Int?,
+    clientMessageId: String?,
+    messageLabel: String?,
+): Boolean =
+    if (dmEnvelope != null) {
+        DmFileDownloader.downloadToCache(
+            messageId = messageId,
+            fileIndex = fileIndex,
+            file = file,
+            envelope = dmEnvelope,
+            currentUserId = currentUserId,
+            clientMessageId = clientMessageId,
+            messageLabel = messageLabel,
+        )
+    } else {
+        DecryptedFileCache.getOrDownloadPlain(
+            messageId = messageId,
+            fileIndex = fileIndex,
+            file = file,
+            clientMessageId = clientMessageId,
+            messageLabel = messageLabel,
+        ) != null
+    }
+

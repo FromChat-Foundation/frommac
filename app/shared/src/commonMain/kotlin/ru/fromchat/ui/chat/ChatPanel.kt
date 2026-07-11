@@ -9,15 +9,19 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import ru.fromchat.api.ApiClient
+import ru.fromchat.api.local.AttachmentMediaLog
 import ru.fromchat.api.local.messages.generateClientMessageId
 import ru.fromchat.api.local.messages.nowMessageTimestampIso
 import ru.fromchat.api.local.messages.sortMessagesForChatDisplay
 import ru.fromchat.api.local.send.OutgoingMessageCoordinator
 import ru.fromchat.api.schema.messages.Message
+import ru.fromchat.api.schema.messages.publicchat.resolvePublicAttachmentLayout
 import ru.fromchat.api.schema.websocket.WebSocketMessage
 import ru.fromchat.Logger
 import ru.fromchat.api.local.send.clearOutboundFileCaches
 import ru.fromchat.api.local.send.clearOutboundImageCaches
+import ru.fromchat.api.local.db.isPlaceholderAttachmentAspectRatio
+import ru.fromchat.api.local.db.isPlaceholderAttachmentDimensions
 import ru.fromchat.ui.chat.utils.TypingHandler
 import ru.fromchat.ui.chat.utils.TypingUser
 import ru.fromchat.ui.chat.utils.dedupeMessagesByClientId
@@ -43,7 +47,9 @@ data class ChatPanelState(
     /** Public chat: registered user count; null until first successful load or WS update. */
     val publicGroupMemberCount: Int? = null,
     /** Public chat: true until first count response (HTTP or WebSocket). */
-    val publicGroupMetaLoading: Boolean = false
+    val publicGroupMetaLoading: Boolean = false,
+    /** Dissolve keys ([messageDissolveKey]) currently playing the Thanos delete/cancel animation. */
+    val dissolvingMessageKeys: Set<String> = emptySet(),
 )
 
 @Serializable
@@ -242,11 +248,7 @@ abstract class ChatPanel(
     open suspend fun cancelQueuedMessage(message: Message) {
         val cid = message.client_message_id?.trim().orEmpty()
         if (cid.isEmpty()) return
-        if (message.pendingFileUri != null) {
-            clearOutboundImageCaches(cid, message.id)
-            clearOutboundFileCaches(cid, message.id)
-        }
-        removeMessage(message.id)
+        if (!beginMessageDissolve(message)) return
         OutgoingMessageCoordinator.cancelOutboundMessage(cid, outboxConversationId())
     }
 
@@ -257,6 +259,59 @@ abstract class ChatPanel(
             msg.client_message_id == cid || msg.uploadJobId == cid
         } ?: return
         cancelQueuedMessage(message)
+    }
+
+    /**
+     * Starts fade+collapse exit animation. Returns false if already exiting.
+     * [finishDissolveAnimation] removes the row when the animation completes (or on timeout).
+     */
+    fun beginMessageDissolve(message: Message): Boolean {
+        val key = messageDissolveKey(message)
+        if (key in _state.dissolvingMessageKeys) return false
+        if (_state.messages.none { messageDissolveKey(it) == key }) return false
+        updateState { state ->
+            state.copy(dissolvingMessageKeys = state.dissolvingMessageKeys + key)
+        }
+        // Off-screen / missed capture: still remove after the dissolve window.
+        scope.launch {
+            delay(messageExitDurationMs().toLong())
+            if (key in _state.dissolvingMessageKeys) {
+                finishDissolveAnimation(key)
+            }
+        }
+        return true
+    }
+
+    /** Called when the exit animation completes (or as a timeout fallback). */
+    fun finishDissolveAnimation(dissolveKey: String) {
+        val key = dissolveKey.trim()
+        if (key.isEmpty()) return
+        val message = _state.messages.find { messageDissolveKey(it) == key }
+        updateState { state ->
+            state.copy(
+                messages = state.messages.filter { messageDissolveKey(it) != key },
+                dissolvingMessageKeys = state.dissolvingMessageKeys - key,
+            )
+        }
+        if (message == null) return
+        if (message.id > 0) clearReplyReferencesTo(message.id)
+        scope.launch(Dispatchers.Default) {
+            val cid = message.client_message_id?.trim().orEmpty()
+            if (message.pendingFileUri != null && cid.isNotEmpty()) {
+                clearOutboundImageCaches(cid, message.id)
+                clearOutboundFileCaches(cid, message.id)
+            }
+            if (message.id < 0 || !message.pendingFileUri.isNullOrBlank()) {
+                runCatching { removeOptimisticFromCache(message) }
+            }
+        }
+    }
+
+    /** @deprecated Use [finishDissolveAnimation]. */
+    fun finishExitAnimation(clientMessageId: String) {
+        val cid = clientMessageId.trim()
+        if (cid.isEmpty()) return
+        finishDissolveAnimation("c:$cid")
     }
 
     /**
@@ -329,11 +384,20 @@ abstract class ChatPanel(
     }
 
     /**
-     * Handle message confirmation (replace temp message with confirmed)
+     * Handle message confirmation (replace temp message with confirmed).
+     * Preserves local attachment preview fields so the tile does not flash failed/loading.
      */
     fun handleMessageConfirmed(tempId: String, confirmedMessage: Message) {
         val pending = pendingMessages.remove(tempId)
         pending?.first?.cancel()
+        AttachmentMediaLog.send(
+            "confirm_start",
+            "job" to tempId.take(12),
+            "realId" to confirmedMessage.id,
+            "files" to (confirmedMessage.files?.size ?: 0),
+            "pendingUri" to (_state.messages.find { it.client_message_id == tempId }
+                ?.pendingFileUri?.take(48) ?: "null"),
+        )
 
         updateState { currentState ->
             val optimistic = currentState.messages.find { it.client_message_id == tempId }
@@ -343,12 +407,32 @@ abstract class ChatPanel(
             } else {
                 confirmedMessage
             }
-            val resolvedConfirmed = if (withClientId.reply_to == null) {
+            val withReply = if (withClientId.reply_to == null) {
                 val reply = optimistic?.reply_to
                 if (reply != null) withClientId.copy(reply_to = reply) else withClientId
             } else {
                 withClientId
             }
+            val resolvedConfirmed = mergeConfirmedAttachmentUi(optimistic, withReply)
+            AttachmentMediaLog.send(
+                "confirm_merged",
+                "job" to tempId.take(12),
+                "realId" to resolvedConfirmed.id,
+                "keepPreview" to (resolvedConfirmed.pendingFileUri?.take(48) ?: "null"),
+                "thumbs" to (resolvedConfirmed.fileThumbnails?.size ?: 0),
+            )
+            AttachmentMediaLog.aspect(
+                "confirm_merged",
+                "job" to tempId.take(12),
+                "realId" to resolvedConfirmed.id,
+                "pairs" to resolvedConfirmed.fileAspectRatioPairs?.firstOrNull(),
+                "dims" to resolvedConfirmed.fileDimensions?.firstOrNull(),
+                "ratios" to resolvedConfirmed.fileAspectRatios?.firstOrNull(),
+                "pendingAspect" to resolvedConfirmed.pendingFileAspectRatio,
+                "optAspect" to optimistic?.pendingFileAspectRatio,
+                "optDims" to optimistic?.fileDimensions?.firstOrNull(),
+                "serverPairs" to withReply.fileAspectRatioPairs?.firstOrNull(),
+            )
             val withoutDupReal = if (resolvedConfirmed.id > 0) {
                 currentState.messages.filter { it.id != resolvedConfirmed.id }
             } else {
@@ -369,10 +453,122 @@ abstract class ChatPanel(
             )
         }
         scope.launch(Dispatchers.Default) {
-            val resolved = _state.messages.find { it.client_message_id == tempId }
-                ?: _state.messages.find { it.id == confirmedMessage.id }
-            val toPersist = resolved ?: confirmedMessage
+            val optimistic = pending?.second
+                ?: _state.messages.find { it.client_message_id == tempId }
+            val resolvedForSeed = _state.messages.find { it.client_message_id == tempId }
+                ?: confirmedMessage
+            seedConfirmedAttachmentCaches(tempId, optimistic, resolvedForSeed)
+            AttachmentMediaLog.send(
+                "confirm_seeded",
+                "job" to tempId.take(12),
+                "realId" to resolvedForSeed.id,
+            )
+            val toPersist = resolvedForSeed
             runCatching { onOptimisticMessageConfirmed(tempId, toPersist) }
+            AttachmentMediaLog.send(
+                "confirm_done",
+                "job" to tempId.take(12),
+                "realId" to confirmedMessage.id,
+            )
+        }
+    }
+
+    /**
+     * Keep the outbound local preview on the confirmed row (DM + public) so confirm is a
+     * blur-fade, not a failed/loading flash.
+     */
+    protected fun mergeConfirmedAttachmentUi(optimistic: Message?, confirmed: Message): Message {
+        if (optimistic == null) return confirmed
+        val hasFiles = !confirmed.files.isNullOrEmpty()
+        if (!hasFiles && optimistic.pendingFileUri == null) return confirmed
+        val localPreview = optimistic.pendingFileUri
+        val primaryName = confirmed.files?.firstOrNull()?.name
+            ?: optimistic.pendingFilename
+            ?: localPreview?.substringAfterLast('/')?.substringBefore('?')
+        val isImage = primaryName != null && isImageFilename(primaryName)
+        val serverDim = confirmed.fileDimensions?.firstOrNull()
+            ?: confirmed.fileAspectRatioPairs?.firstOrNull()?.takeIf { it.size >= 2 }?.let { (w, h) -> w to h }
+        val serverRatio = confirmed.fileAspectRatios?.firstOrNull()
+        val serverAspect = serverRatio
+            ?: serverDim?.let { (w, h) -> if (h > 0) w.toFloat() / h.toFloat() else null }
+        val serverPairList = confirmed.fileAspectRatioPairs?.firstOrNull()
+        val serverHasRealDims = serverPairList?.let { pair ->
+            pair.size >= 2 && !isPlaceholderAttachmentDimensions(pair[0], pair[1])
+        } == true || serverDim?.let { (w, h) ->
+            !isPlaceholderAttachmentDimensions(w, h)
+        } == true
+        val keepLocalAspect = isImage && !serverHasRealDims && (
+            optimistic.pendingFileAspectRatio != null ||
+                optimistic.fileDimensions?.firstOrNull()?.let { (w, h) ->
+                    !isPlaceholderAttachmentDimensions(w, h)
+                } == true
+            )
+        val merged = confirmed.copy(
+            pendingFileUri = when {
+                isImage -> localPreview
+                else -> null
+            },
+            pendingFilename = null,
+            pendingFileAspectRatio = when {
+                keepLocalAspect -> optimistic.pendingFileAspectRatio ?: serverAspect
+                isImage -> null
+                else -> null
+            },
+            fileAspectRatios = when {
+                keepLocalAspect -> optimistic.pendingFileAspectRatio?.let { listOf(it) }
+                    ?: optimistic.fileAspectRatios
+                    ?: confirmed.fileAspectRatios
+                else -> confirmed.fileAspectRatios
+                    ?: optimistic.pendingFileAspectRatio?.takeIf { !serverHasRealDims }?.let { listOf(it) }
+                    ?: optimistic.fileAspectRatios
+            },
+            fileDimensions = when {
+                keepLocalAspect -> optimistic.fileDimensions ?: confirmed.fileDimensions
+                else -> confirmed.fileDimensions ?: optimistic.fileDimensions
+            },
+            fileSizes = confirmed.fileSizes ?: optimistic.fileSizes,
+            fileThumbnails = confirmed.fileThumbnails ?: optimistic.fileThumbnails,
+            uploadJobId = null,
+            uploadProgress = null,
+            uploadError = null,
+        )
+        return if (hasFiles) merged.resolvePublicAttachmentLayout() else merged
+    }
+
+    protected open suspend fun seedConfirmedAttachmentCaches(
+        clientMessageId: String,
+        optimistic: Message?,
+        confirmed: Message,
+    ) {
+        val cid = clientMessageId.trim()
+        if (cid.isEmpty() || confirmed.id <= 0) return
+        val localUri = optimistic?.pendingFileUri?.trim()?.takeIf { it.isNotEmpty() } ?: return
+        val file = confirmed.files?.firstOrNull() ?: return
+        if (isImageFilename(file.name)) {
+            ru.fromchat.api.local.cache.DecryptedImageCache.seedFromLocalFile(
+                messageId = confirmed.id,
+                fileIndex = 0,
+                localFileUri = localUri,
+                clientMessageId = cid,
+            )
+            ru.fromchat.api.local.cache.DecryptedImageCache.ensureDiskAliasForMessageId(
+                messageId = confirmed.id,
+                fileIndex = 0,
+                clientMessageId = cid,
+            )
+        } else {
+            ru.fromchat.api.local.send.seedOutboundFileAsDownloaded(
+                messageId = confirmed.id,
+                fileIndex = 0,
+                localFileUri = localUri,
+                displayFilename = file.name,
+                clientMessageId = cid,
+            )
+            ru.fromchat.api.local.cache.DecryptedFileCache.ensureDiskAliasForMessageId(
+                messageId = confirmed.id,
+                fileIndex = 0,
+                clientMessageId = cid,
+            )
         }
     }
 
@@ -559,6 +755,10 @@ abstract class ChatPanel(
 
     /** DM recipient ID for attachment uploads; null for non-DM panels. */
     open fun getRecipientId(): Int? = null
+
+    /** Whether the composer may attach images/files (DM when recipient is known, or public chat). */
+    open val supportsAttachments: Boolean
+        get() = getRecipientId() != null
 
     open val showUsernamesInMessages: Boolean
         get() = true

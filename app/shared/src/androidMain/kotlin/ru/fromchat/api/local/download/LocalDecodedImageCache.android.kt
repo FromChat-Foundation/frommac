@@ -39,7 +39,11 @@ actual object PlatformDecodedBitmapCache {
 }
 
 actual fun decodeLocalImageFile(absolutePath: String, reqWidthPx: Int, reqHeightPx: Int): ImageBitmap? =
-    decodeSampledFromFile(absolutePath, reqWidthPx, reqHeightPx)?.asImageBitmap()
+    decodeSampledImageFile(absolutePath, reqWidthPx, reqHeightPx)?.asImageBitmap()
+
+/** Sampled decode for disk thumbnail generation and tile loads. */
+internal fun decodeSampledImageFile(path: String, reqWidthPx: Int, reqHeightPx: Int): Bitmap? =
+    decodeSampledFromFile(path, reqWidthPx, reqHeightPx)
 
 actual fun decodeImageBytes(bytes: ByteArray, reqWidthPx: Int, reqHeightPx: Int): ImageBitmap? =
     decodeSampledFromBytes(bytes, reqWidthPx, reqHeightPx)?.asImageBitmap()

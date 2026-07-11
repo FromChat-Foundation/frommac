@@ -18,10 +18,13 @@ import ru.fromchat.api.local.db.store.MessageRepository
 import ru.fromchat.api.local.messages.GENERAL_PUBLIC_GROUP_ID
 import ru.fromchat.api.local.messages.conversationIdForGroup
 import ru.fromchat.api.local.messages.sortMessagesForChatDisplay
+import ru.fromchat.api.local.download.AttachmentDownloadNotifier
+import ru.fromchat.api.local.download.AttachmentDownloadProgress
 import ru.fromchat.api.local.send.OutgoingMessageCoordinator
 import ru.fromchat.api.schema.chats.publicchat.PublicChatProfile
 import ru.fromchat.api.schema.messages.Message
 import ru.fromchat.api.schema.messages.publicchat.SendMessageResponse
+import ru.fromchat.api.schema.messages.publicchat.resolvePublicAttachmentLayout
 import ru.fromchat.api.schema.websocket.WebSocketMessage
 import ru.fromchat.api.schema.websocket.types.MessageDeletedData
 import ru.fromchat.api.schema.websocket.types.ReactionUpdateData
@@ -33,6 +36,7 @@ import ru.fromchat.ui.chat.utils.PublicChatTypingHandler
 import ru.fromchat.ui.chat.utils.TypingHandler
 import ru.fromchat.ui.chat.utils.attachPublicReplyReferences
 import ru.fromchat.ui.chat.utils.mergeDatabaseMessagesWithPanelState
+import ru.fromchat.ui.chat.utils.mergeMessageUiFields
 import ru.fromchat.ui.chat.utils.preserveReplyToFromExisting
 
 class PublicChatPanel(
@@ -76,7 +80,7 @@ class PublicChatPanel(
             val fresh = byId[message.id] ?: return@map message
             ProfileCache.mergePreviewFromPublicMessage(fresh)
             ProfileCache.enrichPublicMessageForDisplay(
-                message.copy(
+                mergeMessageUiFields(fresh, message).copy(
                     username = fresh.username,
                     profile_picture = fresh.profile_picture,
                     verified = fresh.verified,
@@ -91,6 +95,9 @@ class PublicChatPanel(
         get() = true
 
     override val usesPublicGroupSubtitle: Boolean
+        get() = true
+
+    override val supportsAttachments: Boolean
         get() = true
 
     init {
@@ -118,6 +125,21 @@ class PublicChatPanel(
                         isLoading = false,
                     )
                 }
+            }
+        }
+        scope.launch(Dispatchers.Default) {
+            AttachmentDownloadNotifier.progressFlow.collect { event ->
+                if (event !is AttachmentDownloadProgress.Success || event.messageId <= 0) return@collect
+                val uri = DecryptedImageCache.getUriForStorageKey(event.storageKey) ?: return@collect
+                withContext(Dispatchers.Main.immediate) {
+                    updateMessage(event.messageId) { msg ->
+                        msg.copy(pendingFileUri = uri)
+                    }
+                }
+                MessageCacheStore.patchPublicMessageLocalPreview(
+                    messageId = event.messageId,
+                    localPreviewUri = uri,
+                )
             }
         }
         scope.launch {
@@ -213,18 +235,19 @@ class PublicChatPanel(
      * Match optimistic rows via [Message.client_message_id] from the server ack (never by text).
      */
     private suspend fun confirmIncomingOwnMessageOrAdd(newMsg: Message) {
+        val laidOut = newMsg.resolvePublicAttachmentLayout()
         val uid = currentUserId
-        if (uid != null && newMsg.user_id == uid) {
-            val cid = newMsg.client_message_id?.trim().orEmpty()
+        if (uid != null && laidOut.user_id == uid) {
+            val cid = laidOut.client_message_id?.trim().orEmpty()
             if (cid.isNotEmpty()) {
-                handleMessageConfirmed(cid, newMsg)
+                handleMessageConfirmed(cid, laidOut)
                 return
             }
-            if (newMsg.id > 0 && _state.messages.any { it.id == newMsg.id }) {
+            if (laidOut.id > 0 && _state.messages.any { it.id == laidOut.id }) {
                 return
             }
         }
-        ingestIncomingPublicMessage(newMsg)
+        ingestIncomingPublicMessage(laidOut)
     }
 
     private suspend fun ingestIncomingPublicMessage(newMsg: Message) {
@@ -238,11 +261,20 @@ class PublicChatPanel(
     }
 
     private fun mergeNetworkHistoryWithShown(shown: List<Message>, fromNetwork: List<Message>): List<Message> {
+        val shownById = shown.associateBy { it.id }
         val networkIds = fromNetwork.map { it.id }.toSet()
+        val merged = fromNetwork.map { net ->
+            val local = shownById[net.id]
+            if (local == null) {
+                net.resolvePublicAttachmentLayout()
+            } else {
+                mergeMessageUiFields(net, local)
+            }
+        }
         val ahead = shown.filter { it.id > 0 && it.id !in networkIds }
-        if (ahead.isEmpty()) return fromNetwork
+        if (ahead.isEmpty()) return merged
         return ru.fromchat.api.local.messages.sortMessagesForChatDisplay(
-            ru.fromchat.ui.chat.utils.dedupeMessagesByClientId(fromNetwork + ahead),
+            ru.fromchat.ui.chat.utils.dedupeMessagesByClientId(merged + ahead),
         )
     }
 
@@ -273,7 +305,11 @@ class PublicChatPanel(
 
     override suspend fun onOptimisticMessageConfirmed(clientMessageId: String, confirmed: Message) {
         withContext(Dispatchers.Default) {
-            MessageCacheStore.confirmPublicMessage(clientMessageId, confirmed)
+            MessageCacheStore.confirmPublicMessage(
+                clientMessageId,
+                confirmed.resolvePublicAttachmentLayout(),
+            )
+            OutgoingMessageCoordinator.clearAttachmentOutboxAfterAck(clientMessageId)
         }
     }
 
@@ -296,12 +332,13 @@ class PublicChatPanel(
         val response = responseResult.getOrNull()
 
         if (response != null && response.messages.isNotEmpty()) {
-            ProfileCache.mergePreviewFromPublicMessages(response.messages)
+            val networkMessages = response.messages.map { it.resolvePublicAttachmentLayout() }
+            ProfileCache.mergePreviewFromPublicMessages(networkMessages)
             withContext(Dispatchers.Main) {
                 val shown = _state.messages
-                if (shown.isNotEmpty() && !publicHistoryDiffersForUi(shown, response.messages)) {
+                if (shown.isNotEmpty() && !publicHistoryDiffersForUi(shown, networkMessages)) {
                     Logger.d("PublicChatPanel", "Network history matches UI; skip clear/re-add")
-                    val withSenders = mergePublicSenderFieldsFromNetwork(shown, response.messages)
+                    val withSenders = mergePublicSenderFieldsFromNetwork(shown, networkMessages)
                     if (withSenders != shown) {
                         updateState { it.copy(messages = sortMessagesForChatDisplay(withSenders)) }
                     }
@@ -311,7 +348,7 @@ class PublicChatPanel(
                     batchStateUpdates {
                         val merged = preserveReplyToFromExisting(
                             shown,
-                            mergeNetworkHistoryWithShown(shown, response.messages),
+                            mergeNetworkHistoryWithShown(shown, networkMessages),
                         )
                         clearMessages()
                         addMessages(
@@ -323,7 +360,7 @@ class PublicChatPanel(
                 }
             }
             withContext(Dispatchers.Default) {
-                val mergedForCache = mergeNetworkHistoryWithShown(_state.messages, response.messages)
+                val mergedForCache = mergeNetworkHistoryWithShown(_state.messages, networkMessages)
                 MessageCacheStore.replacePublicMessages(mergedForCache)
             }
         } else if (responseResult.isFailure) {
@@ -369,8 +406,9 @@ class PublicChatPanel(
                 ApiClient.getMessages(limit = 50, beforeId = oldestMessage.id)
             }
             if (response.messages.isNotEmpty()) {
-                ProfileCache.mergePreviewFromPublicMessages(response.messages)
-                val older = ProfileCache.enrichPublicMessagesForDisplay(response.messages.reversed())
+                val olderRaw = response.messages.map { it.resolvePublicAttachmentLayout() }
+                ProfileCache.mergePreviewFromPublicMessages(olderRaw)
+                val older = ProfileCache.enrichPublicMessagesForDisplay(olderRaw.reversed())
                 updateState { currentState ->
                     currentState.copy(
                         messages = older + currentState.messages
@@ -499,9 +537,12 @@ class PublicChatPanel(
     }
 
     override suspend fun handleDeleteMessage(messageId: Int) {
-        deleteMessageImmediately(messageId)
-        clearReplyReferencesTo(messageId)
-
+        val message = _state.messages.find { it.id == messageId } ?: return
+        if (messageId < 0) {
+            cancelQueuedMessage(message)
+            return
+        }
+        beginMessageDissolve(message)
         ApiClient.deleteMessage(messageId)
     }
 

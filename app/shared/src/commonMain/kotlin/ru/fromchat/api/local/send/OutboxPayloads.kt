@@ -33,3 +33,15 @@ data class DmAttachmentOutboxPayload(
     val encryptedFileSizeBytes: Long = 0L,
     val uploadId: String = "",
 )
+
+@Serializable
+data class PublicAttachmentOutboxPayload(
+    val content: String,
+    val clientMessageId: String,
+    val replyToId: Int? = null,
+    val fileUri: String,
+    val filename: String,
+    val fileSizeBytes: Long = 0L,
+    val aspectRatio: Float? = null,
+    val uploadId: String = "",
+)

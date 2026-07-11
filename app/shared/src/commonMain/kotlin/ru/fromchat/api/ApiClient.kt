@@ -33,6 +33,8 @@ import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
+import io.ktor.http.Headers
+import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.MainScope
@@ -81,6 +83,12 @@ import ru.fromchat.api.schema.messages.dm.upload.DmUploadInitResponse
 import ru.fromchat.api.schema.messages.dm.upload.DmUploadStatusResponse
 import ru.fromchat.api.schema.chats.publicchat.PublicChatProfile
 import ru.fromchat.api.schema.messages.publicchat.SendMessageRequest
+import ru.fromchat.api.schema.messages.publicchat.upload.PublicUploadChunkRequest
+import ru.fromchat.api.schema.messages.publicchat.upload.PublicUploadChunkResponse
+import ru.fromchat.api.schema.messages.publicchat.upload.PublicUploadCompleteResponse
+import ru.fromchat.api.schema.messages.publicchat.upload.PublicUploadInitRequest
+import ru.fromchat.api.schema.messages.publicchat.upload.PublicUploadInitResponse
+import ru.fromchat.api.schema.messages.publicchat.upload.PublicUploadStatusResponse
 import ru.fromchat.api.schema.server.RegisteredUserCountResponse
 import ru.fromchat.api.schema.server.ServerInstanceIdResponse
 import ru.fromchat.api.schema.server.TransportKeyResponse
@@ -796,6 +804,54 @@ object ApiClient {
         }
     }
 
+    suspend fun initPublicUpload(
+        filename: String,
+        totalSize: Long,
+        chunkSize: Int? = null,
+    ): PublicUploadInitResponse =
+        http.post("${ServerConfig.apiBaseUrl}/public/upload/init") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                PublicUploadInitRequest(
+                    filename = filename,
+                    totalSize = totalSize,
+                    chunkSize = chunkSize,
+                ),
+            )
+        }.body()
+
+    suspend fun getPublicUploadStatus(uploadId: String): PublicUploadStatusResponse =
+        http.get("${ServerConfig.apiBaseUrl}/public/upload/$uploadId") {
+            contentType(ContentType.Application.Json)
+        }.body()
+
+    suspend fun uploadPublicChunk(
+        uploadId: String,
+        offset: Long,
+        dataB64: String,
+    ): PublicUploadChunkResponse =
+        http.patch("${ServerConfig.apiBaseUrl}/public/upload/$uploadId") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                PublicUploadChunkRequest(
+                    offset = offset,
+                    dataB64 = dataB64,
+                ),
+            )
+        }.body()
+
+    suspend fun completePublicUpload(uploadId: String): PublicUploadCompleteResponse =
+        http.post("${ServerConfig.apiBaseUrl}/public/upload/$uploadId/complete") {
+            contentType(ContentType.Application.Json)
+            setBody(mapOf("upload_id" to uploadId))
+        }.body()
+
+    suspend fun abortPublicUpload(uploadId: String) {
+        http.delete("${ServerConfig.apiBaseUrl}/public/upload/$uploadId") {
+            contentType(ContentType.Application.Json)
+        }
+    }
+
     /**
      * Fetch encrypted file bytes. Path is e.g. "/uploads/files/encrypted/xxx.jpg" or "/api/uploads/files/encrypted/xxx.jpg".
      * Backend may return path with /api prefix; apiBaseUrl already includes /api, so we avoid double /api.
@@ -808,6 +864,9 @@ object ApiClient {
         }
         else -> "${ServerConfig.apiBaseUrl}$path"
     }
+
+    /** Plain public-chat attachment URL (same path resolution as [encryptedFileUrl]). */
+    fun normalFileUrl(path: String): String = encryptedFileUrl(path)
 
     /** Encrypted ciphertext stored on disk after a resumable download. */
     data class EncryptedFileOnDisk(
@@ -1448,6 +1507,9 @@ object ApiClient {
         content: String,
         replyToId: Int? = null,
         clientMessageId: String? = null,
+        uploadedFileIds: List<String> = emptyList(),
+        fileBytes: ByteArray? = null,
+        filename: String? = null,
     ): ru.fromchat.api.schema.messages.Message {
         if (_suspensionState.value.isSuspended) {
             throw IllegalStateException("Account suspended")
@@ -1457,12 +1519,23 @@ object ApiClient {
                 content = content.trim(),
                 reply_to_id = replyToId,
                 client_message_id = clientMessageId?.trim()?.takeIf { it.isNotEmpty() },
+                uploaded_file_ids = uploadedFileIds.takeIf { it.isNotEmpty() },
             ),
         )
         val response = http.submitFormWithBinaryData(
             url = "${ServerConfig.apiBaseUrl}/send_message",
             formData = formData {
                 append("payload", payloadJson)
+                if (fileBytes != null && filename != null) {
+                    append(
+                        "files",
+                        fileBytes,
+                        Headers.build {
+                            append(HttpHeaders.ContentType, "application/octet-stream")
+                            append(HttpHeaders.ContentDisposition, "filename=\"$filename\"")
+                        },
+                    )
+                }
             },
         ).body<ru.fromchat.api.schema.messages.publicchat.SendMessageResponse>()
         if (!response.status.equals("success", ignoreCase = true)) {

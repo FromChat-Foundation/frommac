@@ -39,6 +39,36 @@ interface OutboundFileInputStream {
     suspend fun close()
 }
 
+/** Reads [length] bytes from [fileUri] starting at [offset] (seek via skip/read). */
+suspend fun readOutboundFileRange(fileUri: String, offset: Long, length: Int): ByteArray {
+    if (length <= 0) return ByteArray(0)
+    val input = openOutboundFileInputStream(fileUri)
+        ?: throw OutboundFileUnavailableException("Cannot open outbound file")
+    try {
+        var remaining = offset.coerceAtLeast(0L)
+        val skipBuf = ByteArray(8192)
+        while (remaining > 0L) {
+            val toRead = minOf(skipBuf.size.toLong(), remaining).toInt()
+            val n = input.read(skipBuf, 0, toRead)
+            if (n <= 0) throw OutboundFileUnavailableException("Unexpected EOF while seeking")
+            remaining -= n.toLong()
+        }
+        val buffer = ByteArray(length)
+        var read = 0
+        while (read < length) {
+            val n = input.read(buffer, read, length - read)
+            if (n <= 0) break
+            read += n
+        }
+        if (read < length) {
+            throw OutboundFileUnavailableException("Outbound file truncated")
+        }
+        return buffer
+    } finally {
+        input.close()
+    }
+}
+
 expect suspend fun saveEncryptedUploadBlob(instanceId: String, clientMessageId: String, bytes: ByteArray)
 
 expect suspend fun loadEncryptedUploadBlob(instanceId: String, clientMessageId: String): ByteArray?
