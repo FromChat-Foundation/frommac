@@ -1,0 +1,702 @@
+{
+  "@@locale": "ru",
+  "about": "О приложении",
+  "about_link_max": "MAX",
+  "about_link_privacy": "Политика конфиденциальности",
+  "about_link_telegram": "Telegram",
+  "about_link_terms": "Пользовательское соглашение",
+  "about_link_website": "Сайт",
+  "about_version": "Версия 1.0",
+  "account_suspended": "Аккаунт заблокирован",
+  "action_archive": "В архив",
+  "action_cancel_send": "Отменить",
+  "action_chat": "Написать",
+  "action_copy": "Копировать",
+  "action_copy_link": "Скопировать ссылку",
+  "action_delete": "Удалить",
+  "action_delete_chat": "Удалить чат",
+  "action_edit": "Изменить",
+  "action_mark_read": "Прочитано",
+  "action_open_settings": "Настройки",
+  "action_reply": "Ответить",
+  "action_retry_send": "Повторить",
+  "action_save": "Сохранить",
+  "action_select": "Выбрать",
+  "action_wipe_local_cache_confirm_body": "Будут удалены офлайн-сообщения и загрузки для всех экземпляров сервера на этом устройстве. Неотправленные сообщения из очереди будут потеряны.",
+  "action_wipe_local_cache_confirm_title": "Очистить локальные данные?",
+  "action_wipe_local_cache_done": "Локальные данные очищены",
+  "action_wipe_local_cache_supporting": "Удаляет кэш сообщений, медиа и отложенные отправки на этом устройстве. Аккаунт на сервере не затрагивается.",
+  "action_wipe_local_cache_title": "Очистить локальные данные",
+  "api_port_label": "Порт",
+  "app_desc": "100% бесплатный и открытый мессенджер. Поддерживает self-hosted установку на своём сервере.",
+  "app_name": "FromChat",
+  "as_system": "Как на телефоне",
+  "attachment_image_load_failed": "Не удалось загрузить",
+  "attachment_open_chooser_title": "Открыть с помощью",
+  "attachment_open_failed": "Не удалось открыть файл. Попробуйте «Сохранить» в меню сообщения.",
+  "attachment_retry": "Повторить",
+  "attachment_upload_failed": "Не удалось отправить файл",
+  "attachment_upload_failed_too_large": "Файл слишком большой для отправки на этом устройстве",
+  "auth_char_count": "{arg1}/{arg2}",
+  "@auth_char_count": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      }
+    }
+  },
+  "auth_get_started": "Начать",
+  "auth_legal_notice_and": " и ",
+  "auth_legal_notice_prefix": "Регистрируясь, вы соглашаетесь с ",
+  "auth_rate_limit": "Слишком много попыток. Попробуйте позже.",
+  "auth_server_connect_failed": "Не удалось подключиться к серверу",
+  "auth_step_confirm_body": "Введите тот же пароль ещё раз.",
+  "auth_step_confirm_title": "Подтвердите пароль",
+  "auth_step_password_body": "Мы войдём в аккаунт или создадим новый.",
+  "auth_step_password_title": "Введите пароль",
+  "auth_step_profile_body": "Введите ваше отображаемое имя и, если хотите, несколько слов о себе.",
+  "auth_step_profile_title": "Создайте ваш профиль",
+  "auth_step_username_body": "Это ваш логин. С помощью него мы сможем отличить вас от других людей.",
+  "auth_step_username_title": "Введите имя пользователя",
+  "auth_username_taken": "Это имя пользователя уже занято. Выберите другое.",
+  "auth_welcome_tagline": "100% бесплатный мессенджер с открытым исходным кодом.",
+  "auth_welcome_title": "Добро пожаловать в FromChat",
+  "auth_wrong_password": "Неверный пароль",
+  "back": "Назад",
+  "call_accept": "Принять",
+  "call_decline": "Отклонить",
+  "call_dismiss": "ОК",
+  "call_failed_title": "Не удалось соединить",
+  "call_incoming_subtitle": "Входящий звонок",
+  "call_status_calling": "Вызов…",
+  "call_status_connecting": "Подключение…",
+  "call_status_in_call": "Разговор",
+  "call_status_reconnecting": "Переподключение…",
+  "call_status_reconnecting_with_detail": "Переподключение… {arg1}",
+  "@call_status_reconnecting_with_detail": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "call_status_starting": "Запуск вызова…",
+  "calls_port_label": "Порт звонков",
+  "cancel": "Отмена",
+  "cd_account_blocked": "Аккаунт заблокирован",
+  "cd_attachment_retry": "Повторить загрузку изображения",
+  "cd_attachment_upload_retry": "Повторить отправку файла",
+  "cd_call": "Позвонить",
+  "cd_call_camera": "Камера",
+  "cd_call_end": "Завершить",
+  "cd_call_mic": "Микрофон",
+  "cd_call_screenshare": "Демонстрация экрана",
+  "cd_chat_preview_sending": "Отправка сообщения",
+  "cd_chat_preview_uploading": "Загрузка файла",
+  "cd_chat_selected": "Выбрано",
+  "cd_close": "Закрыть",
+  "cd_close_selection": "Закрыть выбор",
+  "cd_emoji": "Эмодзи",
+  "cd_message_send_failed": "Сообщение не отправлено",
+  "cd_pick_file": "Выбрать файл",
+  "cd_pick_image": "Выбрать фото",
+  "cd_remove": "Убрать",
+  "cd_selection_more": "Ещё действия",
+  "cd_send": "Отправить",
+  "cd_similar_verified": "Похож на официальный аккаунт",
+  "cd_verified_account": "Официальный аккаунт",
+  "change_server": "Сменить сервер",
+  "change_server_d": "Подключиться к альтернативному серверу FromChat и выйти из аккаунта.",
+  "chat_date_today": "Сегодня",
+  "chat_date_yesterday": "Вчера",
+  "chat_delete_confirm_body": "Сообщения в выбранных чатах будут удалены с устройства и сервера.",
+  "chat_delete_confirm_title": "Удалить чаты?",
+  "chat_delete_partial_failure": "Не удалось удалить чатов: {arg1}",
+  "@chat_delete_partial_failure": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "chat_group_label": "Группа",
+  "chat_last_mesaage": "Вы: последнее сообщение",
+  "chat_members_count": "{arg1} человек",
+  "@chat_members_count": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "chat_preview_attachment": "Вложение",
+  "chat_preview_image": "{arg1} 1 фото",
+  "@chat_preview_image": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "chat_preview_image_emoji": "📷",
+  "chat_scroll_to_bottom_cd": "Прокрутить к новым сообщениям",
+  "chats": "Чаты",
+  "chats_selected_count": "Выбрано чатов: {arg1}",
+  "@chats_selected_count": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "coming_soon": "Скоро…",
+  "confirm": "Подтвердить",
+  "confirm_password": "Пароль ещё раз",
+  "contacts": "Контакты",
+  "contacts_empty_body": "Список контактов появится здесь, когда функция будет готова.",
+  "contacts_empty_title": "Скоро",
+  "dark": "Тёмное",
+  "debug_tools": "Отладка API",
+  "debug_tools_d": "Просмотр ответов API профиля и личных сообщений.",
+  "deleted_account": "Удалённый аккаунт",
+  "display_name": "Как вас видят другие",
+  "display_name_error": "От 1 до 64 символов",
+  "dms": "Личные чаты",
+  "error_connection": "Не удалось подключиться. Проверьте интернет.",
+  "error_invalid_credentials": "Неверное имя пользователя или пароль",
+  "error_unexpected": "Что-то пошло не так",
+  "error_unknown": "Что-то пошло не так. Попробуйте ещё раз.",
+  "feature_not_implemented": "Пока не реализовано",
+  "fill_all_fields": "Заполните все поля",
+  "hide_password": "Скрыть пароль",
+  "home": "Главная",
+  "https_enabled": "Защищённое соединение",
+  "legal_document_cached_banner": "Показана сохранённая копия документа. Содержимое может быть устаревшим.",
+  "legal_document_load_error": "Не удалось загрузить документ. Проверьте подключение к интернету и попробуйте снова.",
+  "legal_privacy_title": "Политика конфиденциальности",
+  "legal_terms_title": "Пользовательское соглашение",
+  "light": "Светлое",
+  "link_copied": "Ссылка скопирована",
+  "login": "Войти",
+  "login_d": "Войдите в свой аккаунт",
+  "logout": "Выйти",
+  "logs_browse_files_cd": "Просмотр файлов журнала",
+  "logs_clean": "Очистить журнал",
+  "logs_clean_all_body": "Удаляет текущий файл журнала и все архивы.",
+  "logs_clean_apply": "Очистить",
+  "logs_clean_date_body": "Удаляет записи и архивы до выбранной даты (ваш часовой пояс).",
+  "logs_clean_date_day": "День",
+  "logs_clean_date_month": "Месяц",
+  "logs_clean_date_year": "Год",
+  "logs_clean_entries_body": "Оставляет только самые новые записи в текущем файле.",
+  "logs_clean_entries_count": "Оставить новых: {arg1}",
+  "@logs_clean_entries_count": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "logs_clean_mode_all": "Удалить всё",
+  "logs_clean_mode_date": "До даты",
+  "logs_clean_mode_entries": "По числу записей",
+  "logs_clean_mode_size": "По общему размеру",
+  "logs_clean_size_body": "Удаляет старые архивы и записи, пока общий размер журнала не станет меньше лимита.",
+  "logs_clean_size_mb": "Лимит: {arg1} МБ",
+  "@logs_clean_size_mb": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "logs_clean_title": "Очистка журнала",
+  "logs_clear_all_cd": "Очистить все файлы логов",
+  "logs_clear_all_confirm_body": "Будут удалены текущий лог и все архивы.",
+  "logs_clear_all_confirm_title": "Очистить все файлы логов?",
+  "logs_copied": "Скопировано в буфер обмена",
+  "logs_decompressing": "Распаковка…",
+  "logs_delete_file_confirm_body": "Файл будет безвозвратно удалён с устройства.",
+  "logs_delete_file_confirm_title": "Удалить файл журнала?",
+  "logs_delete_files_confirm_body": "Будет безвозвратно удалено файлов: {arg1}.",
+  "@logs_delete_files_confirm_body": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "logs_delete_files_confirm_title": "Удалить выбранные файлы журнала?",
+  "logs_empty": "Записей пока нет",
+  "logs_file_size_kb": "{arg1} КБ",
+  "@logs_file_size_kb": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "logs_file_size_mb": "{arg1} МБ",
+  "@logs_file_size_mb": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "logs_files_title": "Файлы журнала",
+  "logs_level_debug": "debug",
+  "logs_level_error": "error",
+  "logs_level_fatal": "fatal",
+  "logs_level_info": "info",
+  "logs_level_verbose": "verbose",
+  "logs_level_warn": "warning",
+  "logs_open": "Открыть",
+  "logs_rotate": "Ротация журнала",
+  "logs_rotate_confirm_body": "Текущий журнал будет заархивирован и начнётся новый пустой файл.",
+  "logs_rotate_confirm_title": "Ротировать файл журнала?",
+  "logs_scroll_to_bottom_cd": "Прокрутить к последним записям",
+  "logs_search": "Поиск",
+  "logs_search_hint": "Поиск по записям журнала",
+  "logs_selected_count": "Выбрано: {arg1}",
+  "@logs_selected_count": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "logs_share": "Поделиться журналом",
+  "logs_share_compressed": "Сжатый",
+  "logs_share_compressed_desc": "Меньший размер, но нужен gzip для просмотра",
+  "logs_share_how_title": "Как отправить журнал?",
+  "logs_share_uncompressed": "Без сжатия",
+  "logs_share_uncompressed_desc": "Проще читать без дополнительных программ",
+  "logs_title": "Журнал",
+  "materialYou": "Material You",
+  "materialYou_d": "Цвета как на обоях. Работает с Android 12 и новее.",
+  "message_corrupted": "Это сообщение не удалось показать.",
+  "message_corrupted_short": "Сообщение не показывается",
+  "message_edited_suffix": "(изменено)",
+  "message_editing_title": "Правка сообщения",
+  "message_placeholder": "Напишите сообщение…",
+  "message_reply_jump_cd": "Перейти к цитируемому сообщению",
+  "message_reply_photo": "Фото",
+  "message_replying_to": "Ответ {arg1}",
+  "@message_replying_to": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "message_send_failed": "Не удалось отправить",
+  "message_sender_you": "Вы",
+  "month_apr": "апр",
+  "month_aug": "авг",
+  "month_dec": "дек",
+  "month_feb": "фев",
+  "month_jan": "янв",
+  "month_jul": "июл",
+  "month_jun": "июн",
+  "month_mar": "мар",
+  "month_may": "май",
+  "month_name_apr": "апреля",
+  "month_name_aug": "августа",
+  "month_name_dec": "декабря",
+  "month_name_feb": "февраля",
+  "month_name_jan": "января",
+  "month_name_jul": "июля",
+  "month_name_jun": "июня",
+  "month_name_mar": "марта",
+  "month_name_may": "мая",
+  "month_name_nov": "ноября",
+  "month_name_oct": "октября",
+  "month_name_sep": "сентября",
+  "month_nov": "ноя",
+  "month_oct": "окт",
+  "month_sep": "сен",
+  "more": "Ещё",
+  "notif_call_channel_name": "Активный звонок",
+  "notif_call_ongoing_text": "Камера и микрофон остаются включёнными, пока вы вне приложения",
+  "notif_call_ongoing_title": "Видеозвонок",
+  "notif_file_copy_channel_name": "Сохранение файла",
+  "notif_file_copy_text": "Копирование файла в фоне",
+  "notif_file_copy_title": "Сохранение вложения",
+  "notif_file_download_channel_name": "Загрузка файла",
+  "notif_file_download_percent": "{arg1}\\u0025",
+  "@notif_file_download_percent": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "notif_file_download_progress": "{arg1} · {arg2}",
+  "@notif_file_download_progress": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      }
+    }
+  },
+  "notif_file_download_text": "Загрузка продолжается в фоне",
+  "notif_file_download_title": "Загрузка вложения",
+  "notif_media_upload_channel_name": "Загрузка медиа",
+  "notif_media_upload_percent": "{arg1}\\u0025",
+  "@notif_media_upload_percent": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "notif_media_upload_progress": "{arg1} · {arg2}",
+  "@notif_media_upload_progress": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      }
+    }
+  },
+  "notif_media_upload_text": "Загрузка продолжается в фоне",
+  "notif_media_upload_title": "Отправка вложения",
+  "notif_screenshare_text": "Захват экрана активен для этого звонка",
+  "notif_screenshare_title": "Демонстрация экрана",
+  "password": "Пароль",
+  "password_length_error": "Пароль — от 5 до 50 символов",
+  "passwords_dont_match": "Пароли не совпадают",
+  "presence_date_full": "{arg1} {arg2} {arg3} в {arg4}",
+  "@presence_date_full": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      },
+      "arg3": {
+        "type": "Object"
+      },
+      "arg4": {
+        "type": "Object"
+      }
+    }
+  },
+  "presence_date_this_year": "{arg1} {arg2} в {arg3}",
+  "@presence_date_this_year": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      },
+      "arg3": {
+        "type": "Object"
+      }
+    }
+  },
+  "presence_long_ago": "был(а) давно",
+  "presence_online": "В сети",
+  "presence_recently": "Недавно заходил",
+  "presence_today_at": "Сегодня в {arg1}",
+  "@presence_today_at": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "presence_weekday_at": "{arg1} в {arg2}",
+  "@presence_weekday_at": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      }
+    }
+  },
+  "presence_yesterday_at": "Вчера в {arg1}",
+  "@presence_yesterday_at": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "profile": "Профиль",
+  "profile_action_call": "Позвонить",
+  "profile_action_chat": "Написать",
+  "profile_action_contact_info": "Контактная информация",
+  "profile_action_link": "Ссылка",
+  "profile_action_search": "Поиск",
+  "profile_action_settings": "Настройки",
+  "profile_action_video": "Видео",
+  "profile_bio_length_error": "Не более {arg1} символов",
+  "@profile_bio_length_error": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "profile_details_category": "О человеке",
+  "profile_edit_saved": "Профиль обновлён",
+  "profile_edit_title": "Изменить",
+  "profile_headline_bio": "О себе",
+  "profile_headline_member_since": "Дата регистрации",
+  "profile_headline_username": "Имя пользователя",
+  "profile_headline_verification": "Официальный аккаунт",
+  "profile_load_failed": "Не получилось загрузить профиль",
+  "profile_not_found": "Профиль не найден",
+  "profile_open_failed": "Не удалось открыть профиль. Попробуйте снова.",
+  "profile_registration_date": "{arg1} {arg2} {arg3}",
+  "@profile_registration_date": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      },
+      "arg3": {
+        "type": "Object"
+      }
+    }
+  },
+  "profile_title": "Профиль",
+  "profile_verified_support": "Это официальный аккаунт",
+  "profile_verify_prompt_support": "Нажмите, чтобы сделать аккаунт официальным (только админы)",
+  "public_chat": "Общий чат",
+  "register": "Регистрация",
+  "register_button": "Создать аккаунт",
+  "register_d": "Создать новый аккаунт",
+  "save_continue": "Сохранить и продолжить",
+  "search_hint": "Найдите пользователя, имя или чат",
+  "search_not_found": "Ничего не найдено",
+  "search_not_found_message": "Ничего не найдено. Попробуйте переформулировать запрос.",
+  "search_title": "Поиск",
+  "server_config_action_check": "Проверить",
+  "server_config_action_reset": "Сбросить",
+  "server_config_action_reset_confirm_body": "Будет восстановлен адрес сервера по умолчанию.",
+  "server_config_action_reset_confirm_title": "Сбросить настройки?",
+  "server_config_checking": "Проверка…",
+  "server_config_fab_reset": "Сброс",
+  "server_config_fab_verify": "Проверить сервер",
+  "server_config_host_error": "Укажите хост или host:порт (порт по умолчанию — 443).",
+  "server_config_https_headline": "HTTPS",
+  "server_config_https_hint": "HTTPS. Отключайте только для HTTP без шифрования.",
+  "server_config_https_local_hint": "Защищённое соединение. Если сервер локальный, скорее всего вам нужно это отключить.",
+  "server_config_port_error": "Порт от 1 до 65535.",
+  "server_config_session_logged_out_no_instance": "Сессия завершена: не удалось определить ID экземпляра сервера.",
+  "server_config_snackbar_api_fail": "Не удалось подключиться к серверу.",
+  "server_config_snackbar_calls_fail": "Звонки недоступны.",
+  "server_config_snackbar_defaults": "Сброшено на значения по умолчанию.",
+  "server_config_snackbar_ok_api_calls_bad": "Сервер OK; звонки не ответили.",
+  "server_config_snackbar_ok_calls": "Сервер доступен, звонки OK, пинг: {arg1} мс.",
+  "@server_config_snackbar_ok_calls": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "server_config_snackbar_ok_calls_skip": "Сервер доступен (без звонков), пинг: {arg1} мс.",
+  "@server_config_snackbar_ok_calls_skip": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "server_config_snackbar_timeout": "Сервер не ответил вовремя. Повторите попытку.",
+  "server_config_subtitle": "Подключение к альтернативному серверу FromChat. Это дает больше приватности и контроля над данными.",
+  "server_config_title": "Настройка сервера",
+  "server_config_unsupported_no_instance_id": "Сервер не предоставляет корректный ID экземпляра. Подключение невозможно.",
+  "server_ip_hint": "api.fromchat.ru или host:порт",
+  "server_ip_label": "Сервер",
+  "settings": "Настройки",
+  "settings_account_delete": "Удалить аккаунт",
+  "settings_account_delete_confirm_body": "Это нельзя отменить.",
+  "settings_account_delete_confirm_title": "Удалить аккаунт?",
+  "settings_account_delete_d": "Безвозвратно удалить аккаунт и данные",
+  "settings_account_deleted": "Аккаунт удалён",
+  "settings_account_logout_confirm_body": "Придётся войти снова.",
+  "settings_account_logout_confirm_title": "Выйти?",
+  "settings_account_title": "Аккаунт",
+  "settings_category_account": "Аккаунт",
+  "settings_category_account_d": "Выйти или удалить аккаунт",
+  "settings_category_appearance": "Оформление",
+  "settings_category_appearance_d": "Тема и Material You",
+  "settings_category_devices": "Устройства",
+  "settings_category_devices_d": "Активные сессии",
+  "settings_category_notifications": "Уведомления",
+  "settings_category_notifications_d": "Системные настройки уведомлений",
+  "settings_category_security": "Безопасность",
+  "settings_category_security_d": "Смена пароля",
+  "settings_category_server_tools": "Сервер и инструменты",
+  "settings_category_server_tools_d": "Смена сервера, отладка API",
+  "settings_change_password": "Сменить пароль",
+  "settings_confirm_new_password": "Новый пароль ещё раз",
+  "settings_current_password": "Текущий пароль",
+  "settings_delete_account_button": "Удалить аккаунт",
+  "settings_delete_confirm_phrase": "я подтверждаю, что хочу удалить свой аккаунт",
+  "settings_delete_confirm_phrase_instruction": "Чтобы вы случайно не нажали кнопку, введите «{arg1}» (без учёта регистра).",
+  "@settings_delete_confirm_phrase_instruction": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "settings_delete_confirm_phrase_quote": "Я подтверждаю, что хочу удалить свой аккаунт",
+  "settings_delete_consequence_chat_history": "Вы потеряете всю историю переписки.",
+  "settings_delete_consequence_messages": "Отправленные вами сообщения будут анонимизированы.",
+  "settings_delete_consequence_permanent": "Это действие нельзя отменить.",
+  "settings_delete_consequence_username": "Ваше имя пользователя станет доступным всем, и его сможет занять любой.",
+  "settings_delete_step_final_body": "Ваш аккаунт будет удалён НАВСЕГДА и его НЕВОЗМОЖНО восстановить. Вы выйдете на всех устройствах и сразу потеряете доступ.",
+  "settings_delete_step_final_title": "Последнее предупреждение",
+  "settings_delete_step_intro_body": "Ваш аккаунт будет удалён навсегда. Если вы подтвердите действие, произойдёт следующее:",
+  "settings_delete_step_intro_title": "Удалить аккаунт?",
+  "settings_delete_step_password_body": "Введите пароль, чтобы продолжить.",
+  "settings_delete_step_password_title": "Подтвердите пароль",
+  "settings_devices_active_sessions": "Активные сеансы",
+  "settings_devices_current_hint": "Вы вошли на этом устройстве.",
+  "settings_devices_empty": "Нет активных сессий",
+  "settings_devices_empty_sub": "Когда вы войдёте с других телефонов или в браузере, они появятся здесь.",
+  "settings_devices_field_brand": "Бренд",
+  "settings_devices_field_browser": "Браузер",
+  "settings_devices_field_browser_version": "Версия браузера",
+  "settings_devices_field_device_name": "Имя устройства",
+  "settings_devices_field_device_type": "Тип устройства",
+  "settings_devices_field_last_active": "Активность",
+  "settings_devices_field_model": "Модель",
+  "settings_devices_field_os": "Система",
+  "settings_devices_field_os_version": "Версия системы",
+  "settings_devices_field_session_id": "ID сессии",
+  "settings_devices_field_signed_in": "Вход",
+  "settings_devices_last_active": "Активность: {arg1}",
+  "@settings_devices_last_active": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "settings_devices_logout_all": "Выйти на всех других устройствах",
+  "settings_devices_logout_all_confirm_body": "Вы останетесь в аккаунте только на этом устройстве.",
+  "settings_devices_logout_all_confirm_title": "Выйти везде, кроме этого?",
+  "settings_devices_revoke": "Выйти",
+  "settings_devices_sheet_title": "Сведения о сессии",
+  "settings_devices_sign_out_sheet": "Выйти на этом устройстве",
+  "settings_devices_signing_out": "Выход…",
+  "settings_devices_this_device": "Это устройство",
+  "settings_devices_title": "Устройства",
+  "settings_devices_unknown": "Неизвестное устройство",
+  "settings_hub_about_sub": "Версия, ссылки и другое",
+  "settings_hub_logs_sub": "Просмотр, отправка и очистка журнала",
+  "settings_logout_other_sessions": "Выйти на всех других устройствах после смены",
+  "settings_new_password": "Новый пароль",
+  "settings_next": "Далее",
+  "settings_notification_settings": "Настройки уведомлений",
+  "settings_notification_settings_d": "Здесь вы можете включить или выключить типы уведомлений, изменить звук и т.д.",
+  "settings_notifications_permission_required": "Откройте системные настройки и разрешите уведомления.",
+  "settings_notifications_title": "Уведомления",
+  "settings_password_changed": "Пароль обновлён",
+  "settings_push_notifications": "Push-уведомления",
+  "settings_push_notifications_d": "Они помогут вам узнать, если появилось новое сообщение пока приложение закрыто.",
+  "settings_security_change_password_sub": "Обновите пароль для входа",
+  "settings_security_step_confirm_body": "Введите новый пароль ещё раз, чтобы убедиться, что без ошибок.",
+  "settings_security_step_confirm_title": "Подтверждение пароля",
+  "settings_security_step_current_body": "Введите пароль, которым пользуетесь сейчас.",
+  "settings_security_step_current_title": "Текущий пароль",
+  "settings_security_step_new_body": "Придумайте надёжный пароль, который вы здесь ещё не использовали.",
+  "settings_security_step_new_title": "Новый пароль",
+  "settings_security_title": "Безопасность",
+  "show_password": "Показать пароль",
+  "status_connecting": "Соединение",
+  "status_updating": "Обновление",
+  "suspend_chat_banner_message": "Ваш аккаунт был заблокирован",
+  "suspended_default_reason": "Причина не указана. Доступ к отправке временно отключён.",
+  "suspended_sheet_action_contact_support": "Связаться с поддержкой",
+  "suspended_sheet_desc": "Ваш аккаунт заблокирован за нарушение правил.\\nСейчас вы можете читать чаты, но отправка новых сообщений временно отключена.\\nЕсли вы считаете, что это ошибка, свяжитесь с поддержкой и мы поможем разобраться.",
+  "suspended_sheet_reason_label": "Причина",
+  "suspended_sheet_title": "Аккаунт заблокирован",
+  "theme": "Оформление",
+  "typing_alone": "печатает…",
+  "typing_many": "{arg1}, {arg2} и ещё {arg3} печатают…",
+  "@typing_many": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      },
+      "arg3": {
+        "type": "Object"
+      }
+    }
+  },
+  "typing_single": "{arg1} печатает…",
+  "@typing_single": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "typing_two": "{arg1} и {arg2} печатают…",
+  "@typing_two": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      }
+    }
+  },
+  "unknown": "Неизвестно",
+  "unread_count": "+{arg1}",
+  "@unread_count": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "unread_count_badge": "{arg1}",
+  "@unread_count_badge": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "unread_count_overflow": "99+",
+  "unverify": "Снять официальный статус",
+  "username": "Имя пользователя",
+  "username_length_error": "Имя пользователя — от 3 до 20 символов",
+  "verify": "Сделать официальным",
+  "weekday_fri": "пятница",
+  "weekday_mon": "понедельник",
+  "weekday_sat": "суббота",
+  "weekday_sun": "воскресенье",
+  "weekday_thu": "четверг",
+  "weekday_tue": "вторник",
+  "weekday_wed": "среда",
+  "welcome": "Добро пожаловать!"
+}

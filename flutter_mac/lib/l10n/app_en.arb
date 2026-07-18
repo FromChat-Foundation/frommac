@@ -1,0 +1,702 @@
+{
+  "@@locale": "en",
+  "about": "About",
+  "about_link_max": "MAX",
+  "about_link_privacy": "Privacy policy",
+  "about_link_telegram": "Telegram",
+  "about_link_terms": "Terms of service",
+  "about_link_website": "Website",
+  "about_version": "Version 1.0",
+  "account_suspended": "Account suspended",
+  "action_archive": "Archive",
+  "action_cancel_send": "Cancel",
+  "action_chat": "Chat",
+  "action_copy": "Copy",
+  "action_copy_link": "Copy link",
+  "action_delete": "Delete",
+  "action_delete_chat": "Delete chat",
+  "action_edit": "Edit",
+  "action_mark_read": "Mark as read",
+  "action_open_settings": "Settings",
+  "action_reply": "Reply",
+  "action_retry_send": "Retry",
+  "action_save": "Save",
+  "action_select": "Select",
+  "action_wipe_local_cache_confirm_body": "All offline messages and downloads for every server instance on this device will be deleted. Unsent messages in the outbox will be lost.",
+  "action_wipe_local_cache_confirm_title": "Clear local data?",
+  "action_wipe_local_cache_done": "Local data cleared",
+  "action_wipe_local_cache_supporting": "Removes cached messages, media, and pending sends on this device. Your account on the server is not affected.",
+  "action_wipe_local_cache_title": "Clear local data",
+  "api_port_label": "Port",
+  "app_desc": "100% free and open messenger. Supports self-hosted installation on your own server.",
+  "app_name": "FromChat",
+  "as_system": "Same as phone",
+  "attachment_image_load_failed": "Failed to load",
+  "attachment_open_chooser_title": "Open with",
+  "attachment_open_failed": "Couldn't open this file. Try Save from the message menu.",
+  "attachment_retry": "Retry",
+  "attachment_upload_failed": "Couldn't send file",
+  "attachment_upload_failed_too_large": "File is too large to send on this device",
+  "auth_char_count": "{arg1}/{arg2}",
+  "@auth_char_count": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      }
+    }
+  },
+  "auth_get_started": "Get started",
+  "auth_legal_notice_and": " and ",
+  "auth_legal_notice_prefix": "By creating an account you agree to the ",
+  "auth_rate_limit": "Too many attempts. Try again later.",
+  "auth_server_connect_failed": "Failed to connect to the server",
+  "auth_step_confirm_body": "Enter the same password again.",
+  "auth_step_confirm_title": "Confirm your password",
+  "auth_step_password_body": "We will sign you in or create a new account.",
+  "auth_step_password_title": "Enter your password",
+  "auth_step_profile_body": "Enter your display name and, if you like, a few words about yourself.",
+  "auth_step_profile_title": "Create your profile",
+  "auth_step_username_body": "This is your login. It helps us tell you apart from everyone else.",
+  "auth_step_username_title": "Enter your username",
+  "auth_username_taken": "This username was just taken. Please choose another one.",
+  "auth_welcome_tagline": "The 100% free and open source messenger.",
+  "auth_welcome_title": "Welcome to FromChat",
+  "auth_wrong_password": "Wrong password",
+  "back": "Back",
+  "call_accept": "Accept",
+  "call_decline": "Decline",
+  "call_dismiss": "OK",
+  "call_failed_title": "Could not connect",
+  "call_incoming_subtitle": "Incoming call",
+  "call_status_calling": "Calling…",
+  "call_status_connecting": "Connecting…",
+  "call_status_in_call": "In call",
+  "call_status_reconnecting": "Reconnecting…",
+  "call_status_reconnecting_with_detail": "Reconnecting… {arg1}",
+  "@call_status_reconnecting_with_detail": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "call_status_starting": "Starting call…",
+  "calls_port_label": "Calls port",
+  "cancel": "Cancel",
+  "cd_account_blocked": "Account blocked",
+  "cd_attachment_retry": "Retry loading image",
+  "cd_attachment_upload_retry": "Retry sending file",
+  "cd_call": "Call",
+  "cd_call_camera": "Camera",
+  "cd_call_end": "End call",
+  "cd_call_mic": "Microphone",
+  "cd_call_screenshare": "Share screen",
+  "cd_chat_preview_sending": "Sending message",
+  "cd_chat_preview_uploading": "Uploading file",
+  "cd_chat_selected": "Selected",
+  "cd_close": "Close",
+  "cd_close_selection": "Close selection",
+  "cd_emoji": "Emoji",
+  "cd_message_send_failed": "Message failed to send",
+  "cd_pick_file": "Choose file",
+  "cd_pick_image": "Choose photo",
+  "cd_remove": "Remove",
+  "cd_selection_more": "More actions",
+  "cd_send": "Send",
+  "cd_similar_verified": "May be a verified account",
+  "cd_verified_account": "Verified account",
+  "change_server": "Change server",
+  "change_server_d": "Connect to an alternative FromChat server and sign out.",
+  "chat_date_today": "Today",
+  "chat_date_yesterday": "Yesterday",
+  "chat_delete_confirm_body": "Messages in selected chats will be deleted from this device and the server.",
+  "chat_delete_confirm_title": "Delete chats?",
+  "chat_delete_partial_failure": "Could not delete {arg1} chat(s)",
+  "@chat_delete_partial_failure": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "chat_group_label": "Group",
+  "chat_last_mesaage": "You: last message",
+  "chat_members_count": "{arg1} people",
+  "@chat_members_count": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "chat_preview_attachment": "Attachment",
+  "chat_preview_image": "{arg1} 1 photo",
+  "@chat_preview_image": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "chat_preview_image_emoji": "📷",
+  "chat_scroll_to_bottom_cd": "Scroll to latest messages",
+  "chats": "Chats",
+  "chats_selected_count": "{arg1} chats selected",
+  "@chats_selected_count": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "coming_soon": "Coming soon…",
+  "confirm": "Confirm",
+  "confirm_password": "Password again",
+  "contacts": "Contacts",
+  "contacts_empty_body": "Your contacts will appear here when this feature is ready.",
+  "contacts_empty_title": "Coming soon",
+  "dark": "Dark",
+  "debug_tools": "Debug API",
+  "debug_tools_d": "Inspect profile and DM endpoints used by the client.",
+  "deleted_account": "Deleted account",
+  "display_name": "Name shown to others",
+  "display_name_error": "Use between 1 and 64 characters",
+  "dms": "Private chats",
+  "error_connection": "Couldn’t connect. Check your internet.",
+  "error_invalid_credentials": "Wrong username or password",
+  "error_unexpected": "Something went wrong",
+  "error_unknown": "Something went wrong. Please try again.",
+  "feature_not_implemented": "Not implemented yet",
+  "fill_all_fields": "Please fill in every field",
+  "hide_password": "Hide password",
+  "home": "Home",
+  "https_enabled": "Secure connection",
+  "legal_document_cached_banner": "Showing a saved copy. Content may be out of date.",
+  "legal_document_load_error": "Couldn't load the document. Check your connection and try again.",
+  "legal_privacy_title": "Privacy policy",
+  "legal_terms_title": "Terms of service",
+  "light": "Light",
+  "link_copied": "Link copied",
+  "login": "Log in",
+  "login_d": "Log in to your account",
+  "logout": "Log out",
+  "logs_browse_files_cd": "Browse log files",
+  "logs_clean": "Clean logs",
+  "logs_clean_all_body": "Deletes the current log file and all rotated archives.",
+  "logs_clean_apply": "Clean",
+  "logs_clean_date_body": "Delete entries and archives before the selected date (your time zone).",
+  "logs_clean_date_day": "Day",
+  "logs_clean_date_month": "Month",
+  "logs_clean_date_year": "Year",
+  "logs_clean_entries_body": "Keep only the newest entries in the current log file.",
+  "logs_clean_entries_count": "Keep newest: {arg1}",
+  "@logs_clean_entries_count": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "logs_clean_mode_all": "Delete everything",
+  "logs_clean_mode_date": "Before date",
+  "logs_clean_mode_entries": "By entry count",
+  "logs_clean_mode_size": "By total size",
+  "logs_clean_size_body": "Delete oldest archives and entries until total log storage is below the limit.",
+  "logs_clean_size_mb": "Limit: {arg1} MB",
+  "@logs_clean_size_mb": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "logs_clean_title": "Clean logs",
+  "logs_clear_all_cd": "Clear all log files",
+  "logs_clear_all_confirm_body": "This deletes the current log and all rotated archives.",
+  "logs_clear_all_confirm_title": "Clear all log files?",
+  "logs_copied": "Copied to clipboard",
+  "logs_decompressing": "Decompressing…",
+  "logs_delete_file_confirm_body": "This file will be permanently removed from the device.",
+  "logs_delete_file_confirm_title": "Delete log file?",
+  "logs_delete_files_confirm_body": "{arg1} files will be permanently removed from the device.",
+  "@logs_delete_files_confirm_body": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "logs_delete_files_confirm_title": "Delete selected log files?",
+  "logs_empty": "No log entries yet",
+  "logs_file_size_kb": "{arg1} KB",
+  "@logs_file_size_kb": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "logs_file_size_mb": "{arg1} MB",
+  "@logs_file_size_mb": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "logs_files_title": "Log files",
+  "logs_level_debug": "debug",
+  "logs_level_error": "error",
+  "logs_level_fatal": "fatal",
+  "logs_level_info": "info",
+  "logs_level_verbose": "verbose",
+  "logs_level_warn": "warning",
+  "logs_open": "Open",
+  "logs_rotate": "Rotate logs",
+  "logs_rotate_confirm_body": "The current log will be archived and a new empty log file will be started.",
+  "logs_rotate_confirm_title": "Rotate log file?",
+  "logs_scroll_to_bottom_cd": "Scroll to latest logs",
+  "logs_search": "Search",
+  "logs_search_hint": "Search log entries",
+  "logs_selected_count": "{arg1} selected",
+  "@logs_selected_count": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "logs_share": "Share logs",
+  "logs_share_compressed": "Compressed",
+  "logs_share_compressed_desc": "Smaller file size, but requires gzip to view",
+  "logs_share_how_title": "How do you want to send the logs?",
+  "logs_share_uncompressed": "Uncompressed",
+  "logs_share_uncompressed_desc": "Easier to read without any additional software",
+  "logs_title": "Logs",
+  "materialYou": "Material You",
+  "materialYou_d": "Match colors to your wallpaper. Works on Android 12 and up.",
+  "message_corrupted": "This message could not be shown.",
+  "message_corrupted_short": "Can’t show this message",
+  "message_edited_suffix": "(edited)",
+  "message_editing_title": "Edit message",
+  "message_placeholder": "Write a message…",
+  "message_reply_jump_cd": "Jump to quoted message",
+  "message_reply_photo": "Photo",
+  "message_replying_to": "Reply to {arg1}",
+  "@message_replying_to": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "message_send_failed": "Couldn't send",
+  "message_sender_you": "You",
+  "month_apr": "Apr",
+  "month_aug": "Aug",
+  "month_dec": "Dec",
+  "month_feb": "Feb",
+  "month_jan": "Jan",
+  "month_jul": "Jul",
+  "month_jun": "Jun",
+  "month_mar": "Mar",
+  "month_may": "May",
+  "month_name_apr": "april",
+  "month_name_aug": "august",
+  "month_name_dec": "december",
+  "month_name_feb": "february",
+  "month_name_jan": "january",
+  "month_name_jul": "july",
+  "month_name_jun": "june",
+  "month_name_mar": "march",
+  "month_name_may": "may",
+  "month_name_nov": "november",
+  "month_name_oct": "october",
+  "month_name_sep": "september",
+  "month_nov": "Nov",
+  "month_oct": "Oct",
+  "month_sep": "Sep",
+  "more": "More",
+  "notif_call_channel_name": "Ongoing call",
+  "notif_call_ongoing_text": "Camera and microphone stay active while you’re away",
+  "notif_call_ongoing_title": "Video call",
+  "notif_file_copy_channel_name": "Saving file",
+  "notif_file_copy_text": "Copying file in the background",
+  "notif_file_copy_title": "Saving attachment",
+  "notif_file_download_channel_name": "File download",
+  "notif_file_download_percent": "{arg1}\\u0025",
+  "@notif_file_download_percent": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "notif_file_download_progress": "{arg1} · {arg2}",
+  "@notif_file_download_progress": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      }
+    }
+  },
+  "notif_file_download_text": "Download continues in the background",
+  "notif_file_download_title": "Downloading attachment",
+  "notif_media_upload_channel_name": "Media upload",
+  "notif_media_upload_percent": "{arg1}\\u0025",
+  "@notif_media_upload_percent": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "notif_media_upload_progress": "{arg1} · {arg2}",
+  "@notif_media_upload_progress": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      }
+    }
+  },
+  "notif_media_upload_text": "Upload continues in the background",
+  "notif_media_upload_title": "Sending attachment",
+  "notif_screenshare_text": "Screen capture is active for this call",
+  "notif_screenshare_title": "Screen sharing",
+  "password": "Password",
+  "password_length_error": "Password must be 5 to 50 characters",
+  "passwords_dont_match": "The two passwords don’t match",
+  "presence_date_full": "{arg1} {arg2} {arg3} at {arg4}",
+  "@presence_date_full": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      },
+      "arg3": {
+        "type": "Object"
+      },
+      "arg4": {
+        "type": "Object"
+      }
+    }
+  },
+  "presence_date_this_year": "{arg1} {arg2} at {arg3}",
+  "@presence_date_this_year": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      },
+      "arg3": {
+        "type": "Object"
+      }
+    }
+  },
+  "presence_long_ago": "last seen a long time ago",
+  "presence_online": "Online",
+  "presence_recently": "Active recently",
+  "presence_today_at": "Today at {arg1}",
+  "@presence_today_at": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "presence_weekday_at": "{arg1} at {arg2}",
+  "@presence_weekday_at": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      }
+    }
+  },
+  "presence_yesterday_at": "Yesterday at {arg1}",
+  "@presence_yesterday_at": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "profile": "Profile",
+  "profile_action_call": "Call",
+  "profile_action_chat": "Chat",
+  "profile_action_contact_info": "Contact info",
+  "profile_action_link": "Link",
+  "profile_action_search": "Search",
+  "profile_action_settings": "Settings",
+  "profile_action_video": "Video",
+  "profile_bio_length_error": "Up to {arg1} characters",
+  "@profile_bio_length_error": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "profile_details_category": "About this person",
+  "profile_edit_saved": "Profile updated",
+  "profile_edit_title": "Edit",
+  "profile_headline_bio": "About",
+  "profile_headline_member_since": "Joined",
+  "profile_headline_username": "Username",
+  "profile_headline_verification": "Verified account",
+  "profile_load_failed": "Couldn’t load this profile",
+  "profile_not_found": "This profile could not be found",
+  "profile_open_failed": "Could not open this profile. Please try again.",
+  "profile_registration_date": "{arg1} {arg2} {arg3}",
+  "@profile_registration_date": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      },
+      "arg3": {
+        "type": "Object"
+      }
+    }
+  },
+  "profile_title": "Profile",
+  "profile_verified_support": "This account is verified",
+  "profile_verify_prompt_support": "Tap to verify (admins only)",
+  "public_chat": "Main chat",
+  "register": "Sign up",
+  "register_button": "Create account",
+  "register_d": "Create a new account",
+  "save_continue": "Save and continue",
+  "search_hint": "Search by name, username or chat",
+  "search_not_found": "No results",
+  "search_not_found_message": "Nothing found here. Try rephrasing your query.",
+  "search_title": "Search",
+  "server_config_action_check": "Check",
+  "server_config_action_reset": "Reset",
+  "server_config_action_reset_confirm_body": "This restores the default server address.",
+  "server_config_action_reset_confirm_title": "Reset to defaults?",
+  "server_config_checking": "Checking…",
+  "server_config_fab_reset": "Reset to defaults",
+  "server_config_fab_verify": "Check server",
+  "server_config_host_error": "Enter a valid host, or host:port (default port 443).",
+  "server_config_https_headline": "HTTPS",
+  "server_config_https_hint": "Uses HTTPS. Turn off only for plain HTTP.",
+  "server_config_https_local_hint": "Secure connection. If your server is local, you probably should turn it off.",
+  "server_config_port_error": "Enter a port from 1 to 65535.",
+  "server_config_session_logged_out_no_instance": "Session ended: server instance ID could not be resolved.",
+  "server_config_snackbar_api_fail": "Cannot reach the API.",
+  "server_config_snackbar_calls_fail": "Calls not reachable.",
+  "server_config_snackbar_defaults": "Defaults applied.",
+  "server_config_snackbar_ok_api_calls_bad": "Server OK; calls did not respond.",
+  "server_config_snackbar_ok_calls": "Server OK. Calls reachable. Ping: {arg1} ms.",
+  "@server_config_snackbar_ok_calls": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "server_config_snackbar_ok_calls_skip": "Server OK. Calls unavailable. Ping: {arg1} ms.",
+  "@server_config_snackbar_ok_calls_skip": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "server_config_snackbar_timeout": "Server did not respond in time. Try again.",
+  "server_config_subtitle": "Connect to an alternative FromChat server. This can give you more privacy and control over data.",
+  "server_config_title": "Connect to a server",
+  "server_config_unsupported_no_instance_id": "This server does not provide a valid instance ID. Cannot connect.",
+  "server_ip_hint": "api.fromchat.ru or host:port",
+  "server_ip_label": "Server",
+  "settings": "Settings",
+  "settings_account_delete": "Delete account",
+  "settings_account_delete_confirm_body": "This cannot be undone.",
+  "settings_account_delete_confirm_title": "Delete account?",
+  "settings_account_delete_d": "Permanently delete your account and data",
+  "settings_account_deleted": "Account deleted",
+  "settings_account_logout_confirm_body": "You will need to sign in again.",
+  "settings_account_logout_confirm_title": "Log out?",
+  "settings_account_title": "Account",
+  "settings_category_account": "Account",
+  "settings_category_account_d": "Log out or delete account",
+  "settings_category_appearance": "Appearance",
+  "settings_category_appearance_d": "Theme and Material You",
+  "settings_category_devices": "Devices",
+  "settings_category_devices_d": "Signed-in sessions",
+  "settings_category_notifications": "Notifications",
+  "settings_category_notifications_d": "Open system notification settings",
+  "settings_category_security": "Security",
+  "settings_category_security_d": "Change password",
+  "settings_category_server_tools": "Server and tools",
+  "settings_category_server_tools_d": "Change server, debug API",
+  "settings_change_password": "Change password",
+  "settings_confirm_new_password": "Confirm new password",
+  "settings_current_password": "Current password",
+  "settings_delete_account_button": "Delete account",
+  "settings_delete_confirm_phrase": "i confirm that i want to delete my account",
+  "settings_delete_confirm_phrase_instruction": "To avoid you accidentally clicking the button, please type “{arg1}” (case-insensitive).",
+  "@settings_delete_confirm_phrase_instruction": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "settings_delete_confirm_phrase_quote": "I confirm that I want to delete my account",
+  "settings_delete_consequence_chat_history": "You will lose all your chat history.",
+  "settings_delete_consequence_messages": "Your sent messages will be anonymized.",
+  "settings_delete_consequence_permanent": "This cannot be undone.",
+  "settings_delete_consequence_username": "Your username will become available to everyone and anyone can claim it.",
+  "settings_delete_step_final_body": "Your account will be deleted FOREVER and CANNOT be recovered. You will be signed out on all devices and lose access immediately.",
+  "settings_delete_step_final_title": "Last warning",
+  "settings_delete_step_intro_body": "Your account will be deleted forever. If you confirm the action, this will happen:",
+  "settings_delete_step_intro_title": "Do you want to delete your account?",
+  "settings_delete_step_password_body": "Enter your password to continue.",
+  "settings_delete_step_password_title": "Confirm your password",
+  "settings_devices_active_sessions": "Active sessions",
+  "settings_devices_current_hint": "You are signed in here.",
+  "settings_devices_empty": "No active sessions",
+  "settings_devices_empty_sub": "When you sign in on other phones or browsers, they will show up here.",
+  "settings_devices_field_brand": "Brand",
+  "settings_devices_field_browser": "Browser",
+  "settings_devices_field_browser_version": "Browser version",
+  "settings_devices_field_device_name": "Device name",
+  "settings_devices_field_device_type": "Device type",
+  "settings_devices_field_last_active": "Last active",
+  "settings_devices_field_model": "Model",
+  "settings_devices_field_os": "System",
+  "settings_devices_field_os_version": "System version",
+  "settings_devices_field_session_id": "Session ID",
+  "settings_devices_field_signed_in": "Signed in",
+  "settings_devices_last_active": "Last active {arg1}",
+  "@settings_devices_last_active": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "settings_devices_logout_all": "Sign out all other devices",
+  "settings_devices_logout_all_confirm_body": "You stay signed in on this device only.",
+  "settings_devices_logout_all_confirm_title": "Sign out everywhere else?",
+  "settings_devices_revoke": "Sign out",
+  "settings_devices_sheet_title": "Session details",
+  "settings_devices_sign_out_sheet": "Sign out on this device",
+  "settings_devices_signing_out": "Signing out…",
+  "settings_devices_this_device": "This device",
+  "settings_devices_title": "Devices",
+  "settings_devices_unknown": "Unknown device",
+  "settings_hub_about_sub": "Version, links, and more",
+  "settings_hub_logs_sub": "View, share, and manage app logs",
+  "settings_logout_other_sessions": "Sign out all other devices after change",
+  "settings_new_password": "New password",
+  "settings_next": "Next",
+  "settings_notification_settings": "Notification settings",
+  "settings_notification_settings_d": "Here you can enable or disable certain types of notifications, change the sound and more.",
+  "settings_notifications_permission_required": "Open system notification settings to allow alerts.",
+  "settings_notifications_title": "Notifications",
+  "settings_password_changed": "Password updated",
+  "settings_push_notifications": "Push notifications",
+  "settings_push_notifications_d": "These will let you know if you got a new message when the app is closed.",
+  "settings_security_change_password_sub": "Update the password you use to sign in",
+  "settings_security_step_confirm_body": "Type your new password again to make sure it matches.",
+  "settings_security_step_confirm_title": "Confirm new password",
+  "settings_security_step_current_body": "Enter the password you use now to continue.",
+  "settings_security_step_current_title": "Current password",
+  "settings_security_step_new_body": "Choose a strong password you have not used here before.",
+  "settings_security_step_new_title": "New password",
+  "settings_security_title": "Security",
+  "show_password": "Show password",
+  "status_connecting": "Connecting",
+  "status_updating": "Updating",
+  "suspend_chat_banner_message": "Your account was blocked",
+  "suspended_default_reason": "Reason not provided. Your account access is currently read-only.",
+  "suspended_sheet_action_contact_support": "Contact support",
+  "suspended_sheet_desc": "Your account was blocked for violating the community rules.\\nYou can still read your chats, but new messages are currently paused.\\nIf you think this is a mistake, contact support and we can help.",
+  "suspended_sheet_reason_label": "Reason",
+  "suspended_sheet_title": "Account blocked",
+  "theme": "Look",
+  "typing_alone": "typing…",
+  "typing_many": "{arg1}, {arg2} and {arg3} more are typing…",
+  "@typing_many": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      },
+      "arg3": {
+        "type": "Object"
+      }
+    }
+  },
+  "typing_single": "{arg1} is typing…",
+  "@typing_single": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "typing_two": "{arg1} and {arg2} are typing…",
+  "@typing_two": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      },
+      "arg2": {
+        "type": "Object"
+      }
+    }
+  },
+  "unknown": "Unknown",
+  "unread_count": "+{arg1}",
+  "@unread_count": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "unread_count_badge": "{arg1}",
+  "@unread_count_badge": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "unread_count_overflow": "99+",
+  "unverify": "Remove verification",
+  "username": "Username",
+  "username_length_error": "Username must be 3 to 20 characters",
+  "verify": "Verify",
+  "weekday_fri": "Friday",
+  "weekday_mon": "Monday",
+  "weekday_sat": "Saturday",
+  "weekday_sun": "Sunday",
+  "weekday_thu": "Thursday",
+  "weekday_tue": "Tuesday",
+  "weekday_wed": "Wednesday",
+  "welcome": "Welcome!"
+}
